@@ -49,7 +49,7 @@ const appButton = (text: string) => new InlineKeyboard().webApp(text, `${config.
 bot.command("start", (ctx) =>
   ctx.reply(
     `Assalomu alaykum! ☕️\n\n<b>${BRANCH_NAME}</b> yangi filialiga barista qidiryapmiz.\n` +
-      `Shartlar bilan tanishib, 2 daqiqada ariza yuboring — natijani shu yerda xabar qilamiz.`,
+      `Shartlar bilan tanishib, ariza yuboring — natijani shu yerda xabar qilamiz.`,
     { parse_mode: "HTML", reply_markup: appButton("📝 Ariza topshirish") },
   ),
 );
