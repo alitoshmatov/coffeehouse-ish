@@ -2,36 +2,49 @@ import { useCallback, useEffect, useState } from "react";
 import { Coffee, Loader2, LogOut } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { ROLE_LABEL, type AdminUser } from "@/shared/types";
-import { Dashboard } from "./Dashboard";
-import { ContentEditor } from "./ContentEditor";
 import { AdminsPage } from "./AdminsPage";
+import { RoundsPage } from "./RoundsPage";
+import { RoundView, type RoundTab } from "./RoundView";
 
-type Page = "applications" | "content" | "admins";
-const PATHS: Record<Page, string> = { applications: "/admin", content: "/admin/shartlar", admins: "/admin/adminlar" };
-const pageFromPath = (p: string): Page =>
-  p.startsWith(PATHS.content) ? "content" : p.startsWith(PATHS.admins) ? "admins" : "applications";
+/*
+ * Routes:  /admin                 → Qabullar (rounds list)
+ *          /admin/q/:id           → round → Arizalar   (#<applicationId> opens one)
+ *          /admin/q/:id/shartlar  → round → Ish shartlari
+ *          /admin/adminlar        → Adminlar (main admin)
+ */
+type Route = { page: "rounds" } | { page: "admins" } | { page: "round"; id: number; tab: RoundTab };
+
+function parse(path: string): Route {
+  if (path.startsWith("/admin/adminlar")) return { page: "admins" };
+  const m = /^\/admin\/q\/(\d+)(\/shartlar)?/.exec(path);
+  if (m) return { page: "round", id: Number(m[1]), tab: m[2] ? "content" : "applications" };
+  return { page: "rounds" };
+}
+const toPath = (r: Route) =>
+  r.page === "admins" ? "/admin/adminlar" : r.page === "round" ? `/admin/q/${r.id}${r.tab === "content" ? "/shartlar" : ""}` : "/admin";
 
 export default function AdminApp() {
   const [me, setMe] = useState<AdminUser | null | undefined>(undefined);
-  const [page, setPage] = useState<Page>(() => pageFromPath(location.pathname));
+  const [route, setRoute] = useState<Route>(() => parse(location.pathname));
 
   useEffect(() => {
     api<{ admin: AdminUser | null }>("/api/admin/session")
       .then((r) => setMe(r.admin))
       .catch(() => setMe(null));
-    const onPop = () => setPage(pageFromPath(location.pathname));
+    const onPop = () => setRoute(parse(location.pathname));
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
   useEffect(() => {
-    document.title = { applications: "Arizalar", content: "Ish shartlari", admins: "Adminlar" }[page] + " — Coffee House";
-  }, [page]);
+    document.title = { rounds: "Qabullar", round: "Qabul", admins: "Adminlar" }[route.page] + " — Coffee House";
+  }, [route]);
 
-  const go = (p: Page) => {
-    if (p === page) return;
-    history.pushState(null, "", PATHS[p]);
-    setPage(p);
+  const go = (r: Route) => {
+    const path = toPath(r);
+    if (path === location.pathname && !location.hash) return;
+    history.pushState(null, "", path);
+    setRoute(r);
     window.scrollTo(0, 0);
   };
 
@@ -50,11 +63,10 @@ export default function AdminApp() {
     );
   if (!me) return <Login onSuccess={setMe} />;
 
-  const visiblePage = page === "admins" && me.role !== "owner" ? "applications" : page;
-  const nav: { key: Page; label: string }[] = [
-    { key: "applications", label: "Arizalar" },
-    { key: "content", label: "Ish shartlari" },
-    ...(me.role === "owner" ? [{ key: "admins" as Page, label: "Adminlar" }] : []),
+  const current: Route = route.page === "admins" && me.role !== "owner" ? { page: "rounds" } : route;
+  const nav: { route: Route; label: string; active: boolean }[] = [
+    { route: { page: "rounds" }, label: "Qabullar", active: current.page !== "admins" },
+    ...(me.role === "owner" ? [{ route: { page: "admins" } as Route, label: "Adminlar", active: current.page === "admins" }] : []),
   ];
 
   return (
@@ -76,15 +88,15 @@ export default function AdminApp() {
         <nav className="mx-auto max-w-6xl px-4 sm:px-6 mt-3 flex gap-1 overflow-x-auto" aria-label="Bo‘limlar">
           {nav.map((n) => (
             <a
-              key={n.key}
-              href={PATHS[n.key]}
+              key={n.label}
+              href={toPath(n.route)}
               onClick={(e) => {
                 e.preventDefault();
-                go(n.key);
+                go(n.route);
               }}
-              aria-current={visiblePage === n.key ? "page" : undefined}
+              aria-current={n.active ? "page" : undefined}
               className={`whitespace-nowrap rounded-t-xl px-4 py-2.5 text-sm font-medium transition-colors ${
-                visiblePage === n.key ? "bg-cream text-bean" : "text-foam/80 hover:bg-foam/10"
+                n.active ? "bg-cream text-bean" : "text-foam/80 hover:bg-foam/10"
               }`}
             >
               {n.label}
@@ -93,9 +105,18 @@ export default function AdminApp() {
         </nav>
       </header>
 
-      {visiblePage === "applications" && <Dashboard onLogout={onLoggedOut} />}
-      {visiblePage === "content" && <ContentEditor onLogout={onLoggedOut} />}
-      {visiblePage === "admins" && <AdminsPage me={me} onLogout={onLoggedOut} />}
+      {current.page === "rounds" && <RoundsPage onOpen={(id) => go({ page: "round", id, tab: "applications" })} onLogout={onLoggedOut} />}
+      {current.page === "round" && (
+        <RoundView
+          key={current.id}
+          roundId={current.id}
+          tab={current.tab}
+          onTab={(tab) => go({ ...current, tab })}
+          onBack={() => go({ page: "rounds" })}
+          onLogout={onLoggedOut}
+        />
+      )}
+      {current.page === "admins" && <AdminsPage me={me} onLogout={onLoggedOut} />}
     </div>
   );
 }

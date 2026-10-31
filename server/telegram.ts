@@ -4,7 +4,7 @@ import { Bot, InlineKeyboard } from "grammy";
 import { config } from "./config";
 import { branchLine } from "../src/shared/hiring";
 import { formatInterview } from "../src/shared/format";
-import type { Application, InterviewResponse } from "../src/shared/types";
+import type { Application, InterviewResponse, Round } from "../src/shared/types";
 import * as db from "./db";
 
 export interface TgUser {
@@ -48,13 +48,25 @@ export const bot = new Bot(config.botToken);
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const appButton = (text: string) => new InlineKeyboard().webApp(text, `${config.publicUrl}/`);
 
-bot.command("start", (ctx) =>
-  ctx.reply(
-    `Assalomu alaykum! ☕️\n\n<b>${esc(db.getContent().branchName)}</b> filialiga barista qidiryapmiz.\n` +
-      `Shartlar bilan tanishib, ariza yuboring — natijani shu yerda xabar qilamiz.`,
-    { parse_mode: "HTML", reply_markup: appButton("📝 Ariza topshirish") },
-  ),
-);
+/** Link to an application in the manager panel. */
+const panelLink = (a: Application) => `${config.publicUrl}/admin/q/${a.roundId}#${a.id}`;
+/** Branch line of the round an application belongs to. */
+const branchOf = (a: Application) => branchLine((db.getRound(a.roundId) ?? { content: { branchName: "Coffee House", branchAddress: "" } }).content);
+
+bot.command("start", (ctx) => {
+  const open = db.openRounds();
+  const where =
+    open.length === 1
+      ? `<b>${esc(open[0].content.branchName)}</b> filialiga barista qidiryapmiz.`
+      : open.length > 1
+        ? `Coffee House filiallariga barista qidiryapmiz.`
+        : `Hozircha ochiq qabul yo‘q, lekin ilovada arizangiz holatini ko‘rishingiz mumkin.`;
+  return ctx.reply(
+    `Assalomu alaykum! ☕️\n\n${where}\n` +
+      (open.length ? `Shartlar bilan tanishib, ariza yuboring — natijani shu yerda xabar qilamiz.` : ""),
+    { parse_mode: "HTML", reply_markup: appButton(open.length ? "📝 Ariza topshirish" : "Ilovani ochish") },
+  );
+});
 
 /* Interview reply buttons. callback_data = "iv:ok:<id>:<yyyymmddhhmm>" — the time stamp makes
    buttons on an old invitation stop working once the manager picks a new time. */
@@ -94,7 +106,7 @@ export async function recordResponse(a: Application, response: InterviewResponse
   try {
     await bot.api.sendMessage(config.managerChatId, text, {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard().url("Arizani ochish", `${config.publicUrl}/admin#${a.id}`),
+      reply_markup: new InlineKeyboard().url("Arizani ochish", panelLink(a)),
     });
   } catch (e) {
     console.error("Could not notify manager chat:", (e as Error).message);
@@ -190,7 +202,7 @@ export async function notifyApplicant(a: Application): Promise<boolean> {
       `Assalomu alaykum, ${first}! 🎉\n\n` +
       `Arizangiz ko‘rib chiqildi — sizni <b>suhbatga</b> taklif qilamiz.\n\n` +
       (a.interviewAt ? `🗓 <b>Vaqt:</b> ${esc(formatInterview(a.interviewAt))}\n` : "") +
-      `📍 <b>Manzil:</b> ${esc(a.interviewPlace || branchLine(db.getContent()))}\n` +
+      `📍 <b>Manzil:</b> ${esc(a.interviewPlace || branchOf(a))}\n` +
       (a.managerNote ? `\n${esc(a.managerNote)}\n` : "") +
       `\nKela olasizmi? Quyidagi tugma orqali javob bering.`;
   } else if (a.status === "trial") {
@@ -198,7 +210,7 @@ export async function notifyApplicant(a: Application): Promise<boolean> {
       `Tabriklaymiz, ${first}! 🎉☕️\n\n` +
       `Suhbatdan muvaffaqiyatli o‘tdingiz — sizni <b>30 kunlik sinov muddatiga</b> qabul qilamiz.\n\n` +
       (a.trialStartAt ? `🗓 <b>Birinchi ish kuni:</b> ${esc(formatInterview(a.trialStartAt))}\n` : "") +
-      `📍 <b>Filial:</b> ${esc(branchLine(db.getContent()))}\n` +
+      `📍 <b>Filial:</b> ${esc(branchOf(a))}\n` +
       (a.managerNote ? `\n${esc(a.managerNote)}\n` : "") +
       `\nSinov muddatida ham oylik to‘lanadi. Ishni yaxshi o‘rgansangiz, doimiy ishga olinasiz. Omad!`;
   } else if (a.status === "rejected" && a.trialStartAt) {
@@ -228,16 +240,16 @@ export async function notifyApplicant(a: Application): Promise<boolean> {
 }
 
 /** Ping the manager chat about a new application (optional). */
-export async function notifyManager(a: Application) {
+export async function notifyManager(a: Application, round: Round) {
   if (!config.managerChatId) return;
   const text =
-    `🆕 <b>Yangi ariza #${a.id}</b>\n\n` +
+    `🆕 <b>Yangi ariza #${a.id}</b> · ${esc(round.name)}\n\n` +
     `👤 ${esc(a.fullName)}, ${a.age} yosh\n📞 ${esc(a.phone)}` +
     (a.tgUsername ? `\n✈️ @${esc(a.tgUsername)}` : "");
   try {
     await bot.api.sendMessage(config.managerChatId, text, {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard().url("Arizani ochish", `${config.publicUrl}/admin#${a.id}`),
+      reply_markup: new InlineKeyboard().url("Arizani ochish", panelLink(a)),
     });
   } catch (e) {
     console.error("Could not notify manager chat:", (e as Error).message);

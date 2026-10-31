@@ -1,3 +1,5 @@
+import type { JobContent } from "./hiring";
+
 export type Status = "new" | "interview" | "trial" | "rejected";
 export const STATUSES: Status[] = ["new", "interview", "trial", "rejected"];
 
@@ -24,6 +26,27 @@ export interface AdminUser {
   lastLoginAt: string | null;
 }
 
+/** A hiring round ("Qabul") with its own job post and applications. */
+export interface Round {
+  id: number;
+  name: string;
+  open: boolean;
+  content: JobContent;
+  createdAt: string;
+  createdBy: string | null;
+  contentEditedBy: string | null;
+  contentEditedAt: string | null;
+}
+
+/** Round with per-status application counts, for the admin list. */
+export interface RoundSummary extends Round {
+  counts: Record<Status, number>;
+  rescheduleRequests: number;
+}
+
+/** What applicants see of a round. */
+export type PublicRound = Pick<Round, "id" | "name" | "content">;
+
 /** What the applicant fills in. */
 export interface ApplicationInput {
   fullName: string;
@@ -36,6 +59,7 @@ export interface ApplicationInput {
 
 export interface Application extends ApplicationInput {
   id: number;
+  roundId: number;
   tgId: number;
   tgUsername: string | null;
   status: Status;

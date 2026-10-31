@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Inbox, Loader2, RefreshCw, Search } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { Inbox, RefreshCw, Search } from "lucide-react";
 import { formatStamp } from "@/shared/format";
-import type { Application, Status } from "@/shared/types";
+import { branchLine } from "@/shared/hiring";
+import type { Application, Round, Status } from "@/shared/types";
 import { StatusBadge } from "@/ui/StatusBadge";
 import { Detail } from "./Detail";
-import { branchLine, type JobContent } from "@/shared/hiring";
 
 type Tab = Status | "all";
-type ListRes = { applications: Application[]; counts: Record<Status, number>; rescheduleRequests: number; hiringOpen: boolean };
+export type RoundData = {
+  round: Round;
+  applications: Application[];
+  counts: Record<Status, number>;
+  rescheduleRequests: number;
+  storageWarning: string | null;
+};
 const TABS: { key: Tab; label: string }[] = [
   { key: "new", label: "Yangi" },
   { key: "interview", label: "Suhbat" },
@@ -17,46 +22,36 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "all", label: "Hammasi" },
 ];
 
-export function Dashboard({ onLogout }: { onLogout: () => void }) {
-  const [data, setData] = useState<ListRes | null>(null);
-  const [error, setError] = useState("");
+/** Applications of one round: filter tabs, search, list and detail panel. */
+export function Dashboard({
+  data,
+  refreshing,
+  onRefresh,
+  onChange,
+}: {
+  data: RoundData;
+  refreshing: boolean;
+  onRefresh: () => void;
+  onChange: (a: Application) => void;
+}) {
   const [tab, setTab] = useState<Tab>("new");
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(() => Number(location.hash.slice(1)) || null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [defaultPlace, setDefaultPlace] = useState("");
-
-  useEffect(() => {
-    api<{ content: JobContent }>("/api/admin/content")
-      .then((r) => setDefaultPlace(branchLine(r.content)))
-      .catch(() => {});
-  }, []);
-
-  const load = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      setData(await api<ListRes>("/api/admin/applications"));
-      setError("");
-    } catch (e) {
-      if ((e as ApiError).status === 401) onLogout();
-      else setError((e as ApiError).message);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [onLogout]);
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 60_000);
-    return () => clearInterval(t);
-  }, [load]);
+  const defaultPlace = branchLine(data.round.content);
+  const error = "";
 
   useEffect(() => {
     history.replaceState(null, "", selectedId ? `#${selectedId}` : location.pathname);
   }, [selectedId]);
 
+  // Opened from a link to a specific application → show its tab
+  useEffect(() => {
+    const a = data.applications.find((x) => x.id === selectedId);
+    if (a && tab !== "all" && a.status !== tab) setTab(a.status);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const visible = useMemo(() => {
-    if (!data) return [];
     const needle = q.trim().toLowerCase();
     return data.applications.filter(
       (a) =>
@@ -65,43 +60,14 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     );
   }, [data, tab, q]);
 
-  const selected = data?.applications.find((a) => a.id === selectedId) ?? null;
-
-  function replace(updated: Application) {
-    setData((d) => d && { ...d, applications: d.applications.map((a) => (a.id === updated.id ? updated : a)) });
-    load();
-  }
-
-  async function toggleHiring() {
-    if (!data) return;
-    const next = !data.hiringOpen;
-    if (!confirm(next ? "Ariza qabulini ochasizmi?" : "Ariza qabulini yopasizmi? Yangi arizalar qabul qilinmaydi.")) return;
-    const r = await api<{ hiringOpen: boolean }>("/api/admin/settings", { body: { hiringOpen: next } });
-    setData({ ...data, hiringOpen: r.hiringOpen });
-  }
-
-  const count = (t: Tab) => (!data ? 0 : t === "all" ? data.applications.length : data.counts[t]);
+  const selected = data.applications.find((a) => a.id === selectedId) ?? null;
+  const count = (t: Tab) => (t === "all" ? data.applications.length : data.counts[t]);
+  const load = onRefresh;
+  const replace = onChange;
 
   return (
-    <div className="min-h-dvh">
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-5 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="font-poster uppercase text-2xl font-bold">Barista arizalari</h1>
-        {data && (
-          <button
-            onClick={toggleHiring}
-            role="switch"
-            aria-checked={data.hiringOpen}
-            className="inline-flex items-center gap-2.5 rounded-full border border-line bg-white px-3.5 py-1.5 text-sm hover:bg-foam/50"
-          >
-            <span className={`relative h-5 w-9 rounded-full transition-colors ${data.hiringOpen ? "bg-emerald-500" : "bg-stone-300"}`} aria-hidden>
-              <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${data.hiringOpen ? "left-[18px]" : "left-0.5"}`} />
-            </span>
-            {data.hiringOpen ? "Ariza qabuli ochiq" : "Ariza qabuli yopiq"}
-          </button>
-        )}
-      </div>
-
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 py-4 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-6">
+    <div>
+      <div className="py-4 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-6">
         <section className={selected ? "hidden lg:block" : ""}>
           <div className="flex gap-1 overflow-x-auto rounded-full bg-white border border-line p-1" role="tablist">
             {TABS.map((t) => (
@@ -115,7 +81,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 }`}
               >
                 {t.label} <span className="tabular-nums opacity-70">{count(t.key)}</span>
-                {t.key === "interview" && !!data?.rescheduleRequests && (
+                {t.key === "interview" && !!data.rescheduleRequests && (
                   <span
                     className="ml-1 inline-block h-2 w-2 rounded-full bg-amber-500 align-middle"
                     title={`${data.rescheduleRequests} ta nomzod boshqa vaqt so‘radi`}
@@ -138,11 +104,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-          {!data ? (
-            <div className="py-16 flex justify-center">
-              <Loader2 className="w-6 h-6 animate-spin text-ember" />
-            </div>
-          ) : visible.length === 0 ? (
+          {visible.length === 0 ? (
             <div className="mt-3 card py-14 text-center text-bean/60">
               <Inbox className="mx-auto w-8 h-8 text-bean/30" aria-hidden />
               <p className="mt-2">{q ? "Hech narsa topilmadi" : "Bu bo‘limda ariza yo‘q"}</p>

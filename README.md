@@ -19,6 +19,12 @@ bot: polite rejection            ◄───   Rad
 ```
 
 Statuses: `new` → `interview` → `trial`, or `rejected` at any point.
+
+**Qabullar (hiring rounds).** Each Qabul has its own name, "Ish shartlari", open/closed switch and
+applications. Several can be open at once (e.g. two branches) — applicants then pick one first.
+A person can have only one application in progress across all Qabullar; after a rejection they can
+apply again. A Qabul with applications can't be deleted, only closed. On upgrade, the old single job
+post and all existing applications become "1-qabul".
 "Yangiga qaytarish" undoes a decision without messaging the candidate.
 
 One Node process serves everything: the API, the static front end and the bot.
@@ -76,8 +82,9 @@ receiving updates until its next restart.
 
 ## Everyday use
 
-- **Open/close hiring:** the "Qabul ochiq / yopiq" switch in the panel header. When closed, the mini app shows a "closed" screen and new applications are refused.
-- **Change the job text** (title, salary, hours, terms, branch): **Ish shartlari** page in the panel —
+- **New hiring round:** Qabullar → **Yangi qabul** (copy the terms from an earlier Qabul), edit its
+  "Ish shartlari", then switch it open. When no Qabul is open the mini app shows a "closed" screen.
+- **Change the job text** (title, salary, hours, terms, branch): the Qabul's **Ish shartlari** tab —
   with a live phone preview; applicants see it right after saving, no redeploy.
   `src/shared/hiring.ts` only holds the defaults used before the first save.
   The landing site (`ch-landing`) has its own copy of this text — update it there too.
@@ -88,17 +95,18 @@ receiving updates until its next restart.
 
 | Method | Path | Who |
 |---|---|---|
-| GET | `/api/me` | candidate — own latest application + whether hiring is open |
-| POST | `/api/apply` | candidate — submit (one active application per Telegram account) |
+| GET | `/api/me` | candidate — open rounds + own latest application and its round |
+| POST | `/api/apply` | candidate — submit `{roundId, …}` (one active application per Telegram account) |
 | POST | `/api/interview/respond` | candidate — `{response: "confirmed"}` or `{response: "reschedule", note}` |
 | POST | `/api/admin/login` `{username, password}` / `logout`, GET `/api/admin/session` | any admin |
-| GET / PUT | `/api/admin/content` | any admin — job content |
+| GET / POST | `/api/admin/rounds` | any admin — list / create `{name, copyFrom?, open?}` |
+| GET / PATCH / DELETE | `/api/admin/rounds/:id` | any admin — round + its applications / `{name?, open?}` / delete if empty |
+| PUT | `/api/admin/rounds/:id/content` | any admin — that round's job content |
+| POST | `/api/admin/rounds/:id/content/pdf` | any admin — PDF of the job content |
 | GET / POST | `/api/admin/admins` | main admin — list / create HR `{name, username, password}` |
 | PATCH / DELETE | `/api/admin/admins/:id` | main admin — `{name?, password?, active?}` / delete HR |
-| GET | `/api/admin/applications` | manager — all applications + counts |
 | POST | `/api/admin/applications/:id/decision` | manager — `{status: "interview", interviewAt: "2026-11-03T10:00", interviewPlace?, managerNote?}` / `{status: "trial", trialStartAt, managerNote?}` (only after interview) / `{status: "rejected", managerNote?}` / `{status: "new"}` (undo, no message) |
 | POST | `/api/admin/applications/:id/resend` | manager — resend the decision message |
 | POST | `/api/admin/applications/:id/note` | manager — internal note (never shown to candidate) |
-| POST | `/api/admin/settings` | manager — `{hiringOpen: boolean}` |
 
 Times are Tashkent wall-clock time (UTC+5).

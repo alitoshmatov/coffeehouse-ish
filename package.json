@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Coffee House Angren — barista hiring Telegram mini app and manager panel",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "concurrently -k -n api,web \"npm:dev:server\" \"npm:dev:web\"",
     "dev:web": "vite",
@@ -14,12 +16,16 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fontsource/antonio": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
     "express": "^4.21.2",
-    "grammy": "^1.35.0"
+    "grammy": "^1.35.0",
+    "pdfkit": "^0.15.2"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.0",
+    "@types/pdfkit": "^0.17.7",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

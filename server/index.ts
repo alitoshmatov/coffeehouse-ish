@@ -26,8 +26,9 @@ import {
   verifyPassword,
   type AdminReq,
 } from "./auth";
-import { validateContent } from "../src/shared/hiring";
-import { LIMITS, STATUSES, validateInput, type Application, type MyApplication, type Status } from "../src/shared/types";
+import { DEFAULT_CONTENT, validateContent } from "../src/shared/hiring";
+import { jobContentPdf } from "./pdf";
+import { LIMITS, validateInput, type Application, type MyApplication, type PublicRound, type Round } from "../src/shared/types";
 
 ensureOwner();
 
@@ -48,14 +49,22 @@ function requireTelegram(req: TgReq, res: express.Response, next: express.NextFu
 
 const forApplicant = ({ internalNote: _i, tgId: _t, ...rest }: Application): MyApplication => rest;
 
+const publicRound = ({ id, name, content }: Round): PublicRound => ({ id, name, content });
+
 app.get("/api/me", requireTelegram, (req: TgReq, res) => {
   const latest = db.latestForUser(req.tgUser!.id);
-  res.json({ hiringOpen: db.isHiringOpen(), content: db.getContent(), application: latest ? forApplicant(latest) : null });
+  const round = latest ? db.getRound(latest.roundId) : null;
+  res.json({
+    rounds: db.openRounds().map(publicRound), // open rounds the person can apply to
+    application: latest ? forApplicant(latest) : null,
+    applicationRound: round ? publicRound(round) : null,
+  });
 });
 
 app.post("/api/apply", requireTelegram, async (req: TgReq, res) => {
   const user = req.tgUser!;
-  if (!db.isHiringOpen()) return res.status(409).json({ error: "Hozircha ariza qabul qilinmaydi." });
+  const round = db.getRound(Number(req.body?.roundId));
+  if (!round || !round.open) return res.status(409).json({ error: "Bu qabul yopilgan. Ilovani qayta oching." });
 
   const latest = db.latestForUser(user.id);
   if (latest && latest.status !== "rejected")
@@ -64,9 +73,9 @@ app.post("/api/apply", requireTelegram, async (req: TgReq, res) => {
   const { ok, errors, value } = validateInput(req.body ?? {});
   if (!ok) return res.status(400).json({ error: "Maydonlarni tekshiring.", fields: errors });
 
-  const created = db.createApplication(user.id, user.username ?? null, value);
-  notifyManager(created); // fire and forget
-  res.status(201).json({ application: forApplicant(created) });
+  const created = db.createApplication(round.id, user.id, user.username ?? null, value);
+  notifyManager(created, round); // fire and forget
+  res.status(201).json({ application: forApplicant(created), applicationRound: publicRound(round) });
 });
 
 /** Applicant confirms the interview or asks for another time. */
@@ -110,15 +119,58 @@ app.get("/api/admin/session", (req, res) => {
   res.json({ admin: admin ? db.publicAdmin(admin) : null });
 });
 
-app.get("/api/admin/applications", requireAdmin, (req, res) => {
-  const s = req.query.status as Status | undefined;
-  const status = s && STATUSES.includes(s) ? s : undefined;
-  res.json({
-    applications: db.listApplications(status),
-    counts: db.countByStatus(),
-    rescheduleRequests: db.countRescheduleRequests(),
-    hiringOpen: db.isHiringOpen(),
+/* Rounds (Qabul) — every admin */
+
+const storageWarning = () => (db.storage.persistent === false && config.isProd ? db.storage.path : null);
+
+app.get("/api/admin/rounds", requireAdmin, (_req, res) => {
+  res.json({ rounds: db.listRounds(), storageWarning: storageWarning() });
+});
+
+app.post("/api/admin/rounds", requireAdmin, (req: AdminReq, res) => {
+  const name = String(req.body?.name ?? "").trim().slice(0, 80);
+  if (!name) return res.status(400).json({ error: "Qabul nomini yozing." });
+  const from = req.body?.copyFrom ? db.getRound(Number(req.body.copyFrom)) : null;
+  const round = db.createRound({
+    name,
+    content: from ? from.content : DEFAULT_CONTENT,
+    open: req.body?.open === true,
+    createdBy: req.admin!.name,
   });
+  res.status(201).json({ round });
+});
+
+app.get("/api/admin/rounds/:id", requireAdmin, (req, res) => {
+  const round = db.getRound(Number(req.params.id));
+  if (!round) return res.status(404).json({ error: "Qabul topilmadi." });
+  res.json({
+    round,
+    applications: db.listApplications(round.id),
+    counts: db.countByStatus(round.id),
+    rescheduleRequests: db.countRescheduleRequests(round.id),
+    storageWarning: storageWarning(),
+  });
+});
+
+app.patch("/api/admin/rounds/:id", requireAdmin, (req, res) => {
+  const round = db.getRound(Number(req.params.id));
+  if (!round) return res.status(404).json({ error: "Qabul topilmadi." });
+  const patch: { name?: string; open?: boolean } = {};
+  if (typeof req.body?.name === "string") {
+    const name = req.body.name.trim().slice(0, 80);
+    if (!name) return res.status(400).json({ error: "Qabul nomini yozing." });
+    patch.name = name;
+  }
+  if (typeof req.body?.open === "boolean") patch.open = req.body.open;
+  res.json({ round: db.updateRound(round.id, patch) });
+});
+
+app.delete("/api/admin/rounds/:id", requireAdmin, (req, res) => {
+  const round = db.getRound(Number(req.params.id));
+  if (!round) return res.status(404).json({ error: "Qabul topilmadi." });
+  if (!db.deleteRound(round.id))
+    return res.status(409).json({ error: "Arizalari bor qabulni o‘chirib bo‘lmaydi — uni yoping." });
+  res.json({ ok: true });
 });
 
 const LOCAL_DT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
@@ -176,22 +228,32 @@ app.post("/api/admin/applications/:id/note", requireAdmin, (req, res) => {
   res.json({ application: db.setInternalNote(id, note) });
 });
 
-app.post("/api/admin/settings", requireAdmin, (req, res) => {
-  if (typeof req.body?.hiringOpen === "boolean") db.setSetting("hiring_open", req.body.hiringOpen ? "1" : "0");
-  res.json({ hiringOpen: db.isHiringOpen() });
-});
+/* Job content ("Ish shartlari") of a round — every admin */
 
-/* Job content ("Ish shartlari") — every admin */
-
-app.get("/api/admin/content", requireAdmin, (_req, res) => {
-  res.json({ content: db.getContent(), meta: db.getContentMeta() });
-});
-
-app.put("/api/admin/content", requireAdmin, (req: AdminReq, res) => {
+app.put("/api/admin/rounds/:id/content", requireAdmin, (req: AdminReq, res) => {
+  const round = db.getRound(Number(req.params.id));
+  if (!round) return res.status(404).json({ error: "Qabul topilmadi." });
   const r = validateContent(req.body?.content);
   if (!r.ok) return res.status(400).json({ error: r.error });
-  db.setContent(r.value, req.admin!.name);
-  res.json({ content: db.getContent(), meta: db.getContentMeta() });
+  res.json({ round: db.setRoundContent(round.id, r.value, req.admin!.name) });
+});
+
+/** PDF of a round's job post. Uses the posted (possibly unsaved) content so it matches the preview. */
+app.post("/api/admin/rounds/:id/content/pdf", requireAdmin, async (req, res) => {
+  const round = db.getRound(Number(req.params.id));
+  if (!round) return res.status(404).json({ error: "Qabul topilmadi." });
+  const r = validateContent(req.body?.content ?? round.content);
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  try {
+    const pdf = await jobContentPdf(r.value);
+    const file = `ish-shartlari-${round.name}`.replace(/[^\w.-]+/g, "-").replace(/-+/g, "-").toLowerCase();
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${file}.pdf"`);
+    res.send(pdf);
+  } catch (e) {
+    console.error("PDF failed:", e);
+    res.status(500).json({ error: "PDF yaratib bo‘lmadi." });
+  }
 });
 
 /* Admin accounts — main admin only */

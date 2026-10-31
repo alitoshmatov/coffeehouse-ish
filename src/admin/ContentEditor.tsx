@@ -1,32 +1,23 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, CheckCircle2, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle2, FileDown, Loader2, Plus, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { formatStamp } from "@/shared/format";
 import { CONTENT_LIMITS as L, DEFAULT_CONTENT, type JobContent } from "@/shared/hiring";
 import { JobIntro } from "@/applicant/JobIntro";
 
-type Meta = { editedBy: string; editedAt: string } | null;
-type Res = { content: JobContent; meta: Meta };
+import type { Round } from "@/shared/types";
 
-export function ContentEditor({ onLogout }: { onLogout: () => void }) {
-  const [saved, setSaved] = useState<JobContent | null>(null);
-  const [draft, setDraft] = useState<JobContent | null>(null);
-  const [meta, setMeta] = useState<Meta>(null);
+/** "Ish shartlari" of one round, with a live phone preview and PDF export. */
+export function ContentEditor({ round, onSaved, onLogout }: { round: Round; onSaved: (r: Round) => void; onLogout: () => void }) {
+  const saved = round.content;
+  const [draft, setDraft] = useState<JobContent>(round.content);
+  const meta = round.contentEditedBy && round.contentEditedAt ? { editedBy: round.contentEditedBy, editedAt: round.contentEditedAt } : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
-  useEffect(() => {
-    api<Res>("/api/admin/content")
-      .then((r) => {
-        setSaved(r.content);
-        setDraft(r.content);
-        setMeta(r.meta);
-      })
-      .catch((e: ApiError) => (e.status === 401 ? onLogout() : setError(e.message)));
-  }, [onLogout]);
-
-  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(saved);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
 
   useEffect(() => {
     if (!dirty) return;
@@ -35,26 +26,44 @@ export function ContentEditor({ onLogout }: { onLogout: () => void }) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  if (!draft)
-    return (
-      <div className="py-20 flex justify-center">
-        {error ? <p className="text-red-600">{error}</p> : <Loader2 className="w-6 h-6 animate-spin text-ember" />}
-      </div>
-    );
-
   const set = <K extends keyof JobContent>(k: K, v: JobContent[K]) => {
     setDraft({ ...draft, [k]: v });
     setDone(false);
   };
 
+  /** Download what the preview shows (including unsaved edits) as a PDF. */
+  async function downloadPdf() {
+    setPdfBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/rounds/${round.id}/content/pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ content: draft }),
+      });
+      if (res.status === 401) return onLogout();
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "PDF yaratib bo‘lmadi.");
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "ish-shartlari.pdf";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      setError((e as Error).message === "Failed to fetch" ? "Internet aloqasini tekshiring." : (e as Error).message);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   async function save() {
     setBusy(true);
     setError("");
     try {
-      const r = await api<Res>("/api/admin/content", { method: "PUT", body: { content: draft } });
-      setSaved(r.content);
-      setDraft(r.content);
-      setMeta(r.meta);
+      const r = await api<{ round: Round }>(`/api/admin/rounds/${round.id}/content`, { method: "PUT", body: { content: draft } });
+      setDraft(r.round.content);
+      onSaved(r.round);
       setDone(true);
     } catch (e) {
       if ((e as ApiError).status === 401) onLogout();
@@ -65,22 +74,32 @@ export function ContentEditor({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 py-5 pb-28 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-8">
+    <div className="pb-28 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-8">
       <div>
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h1 className="font-poster uppercase text-2xl font-bold">Ish shartlari</h1>
             <p className="text-sm text-bean/60">
-              Nomzodlar ilovada ko‘radigan matn.
+              Shu qabulga ariza topshiruvchilar ko‘radigan matn.
               {meta && ` Oxirgi o‘zgartirish: ${meta.editedBy}, ${formatStamp(meta.editedAt)}.`}
             </p>
           </div>
-          <button
-            onClick={() => confirm("Standart matnni yuklaysizmi? Saqlamaguningizcha hech narsa o‘zgarmaydi.") && setDraft(DEFAULT_CONTENT)}
-            className="text-sm text-bean/55 underline underline-offset-2 hover:text-bean"
-          >
-            Standart matnni yuklash
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => confirm("Standart matnni yuklaysizmi? Saqlamaguningizcha hech narsa o‘zgarmaydi.") && setDraft(DEFAULT_CONTENT)}
+              className="text-sm text-bean/55 underline underline-offset-2 hover:text-bean"
+            >
+              Standart matnni yuklash
+            </button>
+            <button
+              onClick={downloadPdf}
+              disabled={pdfBusy}
+              className="btn-ghost h-10 px-4 text-sm"
+              title={dirty ? "Saqlanmagan o‘zgarishlar ham PDF’ga kiradi" : undefined}
+            >
+              {pdfBusy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden /> : <FileDown className="w-4 h-4" aria-hidden />}
+              PDF yuklab olish
+            </button>
+          </div>
         </div>
 
         <Section title="Sarlavha">

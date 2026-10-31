@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, Loader2, Phone } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { ensureWriteAccess, haptic, requestPhone, tg } from "@/lib/telegram";
-import { LIMITS, validateInput, type ApplicationInput, type MyApplication } from "@/shared/types";
+import { LIMITS, validateInput, type ApplicationInput, type MyApplication, type PublicRound } from "@/shared/types";
 import { BottomBar } from "./BottomBar";
 
 type Draft = { fullName: string; phone: string; age: string; currentDuties: string; experience: string; whyUs: string };
@@ -28,7 +28,7 @@ function initialDraft(): Draft {
   };
 }
 
-export function ApplyForm({ branchName, onDone }: { branchName: string; onDone: (a: MyApplication) => void }) {
+export function ApplyForm({ round, onDone, onClosed }: { round: PublicRound; onDone: (a: MyApplication) => void; onClosed: () => void }) {
   const [d, setD] = useState<Draft>(initialDraft);
   const [touched, setTouched] = useState<Partial<Record<Key, boolean>>>({});
   const [submitted, setSubmitted] = useState(false);
@@ -74,7 +74,7 @@ export function ApplyForm({ branchName, onDone }: { branchName: string; onDone: 
     setSending(true);
     try {
       await ensureWriteAccess();
-      const body: ApplicationInput = { ...d, age: Number(d.age) };
+      const body: ApplicationInput & { roundId: number } = { ...d, age: Number(d.age), roundId: round.id };
       const { application } = await api<{ application: MyApplication }>("/api/apply", { body });
       try {
         localStorage.removeItem(DRAFT_KEY);
@@ -87,6 +87,7 @@ export function ApplyForm({ branchName, onDone }: { branchName: string; onDone: 
       const ae = e as ApiError;
       haptic("error");
       setServerErr(ae.message);
+      if (ae.status === 409 && /yopilgan/.test(ae.message)) setTimeout(onClosed, 2500); // round closed meanwhile
       if (ae.fields) setServerFields(ae.fields as Partial<Record<Key, string>>);
     } finally {
       setSending(false);
@@ -97,7 +98,7 @@ export function ApplyForm({ branchName, onDone }: { branchName: string; onDone: 
     <main className="px-5 pt-6 pb-32">
       <h1 className="font-poster uppercase text-3xl font-bold">Ariza</h1>
       <p className="mt-1 text-bean/70">
-        {branchName} · <span className="text-ember">*</span> majburiy
+        {round.content.branchName} · <span className="text-ember">*</span> majburiy
       </p>
 
       <form ref={formRef} onSubmit={submit} noValidate className="mt-6 space-y-5">
