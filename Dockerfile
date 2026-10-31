@@ -2,7 +2,8 @@
 FROM node:22-slim AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# --include=dev: build tools are devDependencies; Coolify may pass NODE_ENV=production as a build arg
+RUN npm ci --include=dev
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
