@@ -3,7 +3,16 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { config } from "./config";
 import * as db from "./db";
-import { notifyApplicant, notifyManager, recordResponse, startBot, verifyInitData, type TgUser } from "./telegram";
+import {
+  handleWebhook,
+  notifyApplicant,
+  notifyManager,
+  recordResponse,
+  startBot,
+  verifyInitData,
+  WEBHOOK_PATH,
+  type TgUser,
+} from "./telegram";
 import { checkPassword, clearSession, isAdmin, issueSession, loginLimiter, requireAdmin } from "./auth";
 import { LIMITS, STATUSES, validateInput, type Application, type MyApplication, type Status } from "../src/shared/types";
 
@@ -147,6 +156,7 @@ app.post("/api/admin/settings", requireAdmin, (req, res) => {
   res.json({ hiringOpen: db.isHiringOpen() });
 });
 
+app.post(WEBHOOK_PATH, handleWebhook);
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
 
@@ -161,3 +171,6 @@ if (existsSync(dist)) {
 app.listen(config.port, () => console.log(`ch-ish listening on :${config.port}`));
 
 if (process.env.BOT_DISABLED !== "1") startBot().catch((e) => console.error("Bot failed to start:", e));
+
+// Last line of defence: log, don't die — the API and manager panel must stay up.
+process.on("unhandledRejection", (e) => console.error("Unhandled rejection:", e));

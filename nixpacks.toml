@@ -1,0 +1,13 @@
+# Used only if Coolify builds with Nixpacks instead of the Dockerfile.
+# Leave Install/Build/Start Command empty in Coolify so these apply.
+[variables]
+NIXPACKS_NODE_VERSION = "22"
+
+[phases.install]
+cmds = ["npm ci --include=dev"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"

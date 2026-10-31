@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import type { Request, Response } from "express";
 import { Bot, InlineKeyboard } from "grammy";
 import { config } from "./config";
 import { BRANCH_ADDRESS, BRANCH_NAME } from "../src/shared/hiring";
@@ -110,12 +111,74 @@ bot.on("message", (ctx) =>
 bot.catch((err) => console.error("Bot error:", err.error));
 
 /** Start long polling and point the chat menu button at the mini app. */
+/*
+ * Production (https PUBLIC_URL): webhook. Telegram pushes updates to /api/telegram/webhook,
+ * so during a rolling deploy the old and new containers never fight over getUpdates.
+ * Local dev (http PUBLIC_URL) or BOT_MODE=polling: long polling.
+ * Bot problems are logged and retried — they must never take the web server down.
+ */
+export const useWebhook = config.publicUrl.startsWith("https://") && process.env.BOT_MODE !== "polling";
+export const WEBHOOK_PATH = "/api/telegram/webhook";
+const webhookSecret = createHash("sha256").update(`webhook:${config.botToken}`).digest("hex").slice(0, 48);
+let botReady = false;
+
+/** Express handler for Telegram webhook updates. */
+export async function handleWebhook(req: Request, res: Response) {
+  if (req.get("X-Telegram-Bot-Api-Secret-Token") !== webhookSecret) return res.sendStatus(401);
+  res.sendStatus(200); // acknowledge at once so Telegram never re-sends
+  try {
+    if (!botReady) {
+      await bot.init();
+      botReady = true;
+    }
+    await bot.handleUpdate(req.body);
+  } catch (e) {
+    console.error("Bot update failed:", (e as Error).message);
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export async function startBot() {
-  await bot.api.setChatMenuButton({
-    menu_button: { type: "web_app", text: "Ariza", web_app: { url: `${config.publicUrl}/` } },
-  });
-  await bot.api.setMyCommands([{ command: "start", description: "Ariza topshirish" }]);
-  bot.start({ drop_pending_updates: true, onStart: (me) => console.log(`Bot @${me.username} started`) });
+  // Setup calls: retry until Telegram answers (e.g. network hiccup at boot)
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await bot.init();
+      botReady = true;
+      await bot.api.setChatMenuButton({
+        menu_button: { type: "web_app", text: "Ariza", web_app: { url: `${config.publicUrl}/` } },
+      });
+      await bot.api.setMyCommands([{ command: "start", description: "Ariza topshirish" }]);
+      if (useWebhook) {
+        await bot.api.setWebhook(`${config.publicUrl}${WEBHOOK_PATH}`, {
+          secret_token: webhookSecret,
+          allowed_updates: ["message", "callback_query"],
+        });
+        console.log(`Bot @${bot.botInfo.username} ready (webhook)`);
+        return;
+      }
+      break;
+    } catch (e) {
+      console.error(`Bot setup failed (attempt ${attempt}):`, (e as Error).message);
+      await sleep(Math.min(60_000, attempt * 5_000));
+    }
+  }
+
+  // Long polling. A 409 means another instance is polling with the same token —
+  // keep retrying instead of crashing; it resolves when the other one stops.
+  for (;;) {
+    try {
+      await bot.start({
+        drop_pending_updates: true,
+        allowed_updates: ["message", "callback_query"],
+        onStart: (me) => console.log(`Bot @${me.username} ready (polling)`),
+      });
+      return; // bot.stop() was called
+    } catch (e) {
+      console.error("Polling stopped:", (e as Error).message, "— retrying in 15s");
+      await sleep(15_000);
+    }
+  }
 }
 
 /** Message sent to the applicant when the manager decides. Returns true if delivered. */

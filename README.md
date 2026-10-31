@@ -21,8 +21,12 @@ bot: polite rejection            ◄───   Rad
 Statuses: `new` → `interview` → `trial`, or `rejected` at any point.
 "Yangiga qaytarish" undoes a decision without messaging the candidate.
 
-One Node process serves everything: the API, the static front end and the bot
-(long polling). Data lives in a single SQLite file.
+One Node process serves everything: the API, the static front end and the bot.
+Data lives in a single SQLite file.
+
+**Bot mode:** with an `https://` `PUBLIC_URL` (production) the bot uses a **webhook** at
+`/api/telegram/webhook`, so rolling deploys never conflict. With an `http://` URL (local dev)
+it uses long polling. Bot errors are logged and retried — they never take the panel down.
 
 ## Stack
 
@@ -57,7 +61,9 @@ The manager panel works in any browser: http://localhost:5173/admin
 4. Environment variables: everything from `.env.example` (`DB_PATH` can stay at the default `/data/ish.db`).
 5. Deploy. The log should show `Bot @YourBot started`.
 
-Run only **one** instance — two instances would both poll the bot.
+Use a **separate test bot** for local development. If you run `npm run dev` with the
+production token, the local server switches the bot to polling and production stops
+receiving updates until its next restart.
 
 ## Everyday use
 
