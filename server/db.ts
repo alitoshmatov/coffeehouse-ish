@@ -2,7 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config";
-import type { Application, ApplicationInput, InterviewResponse, Status } from "../src/shared/types";
+import type { AdminRole, AdminUser, Application, ApplicationInput, InterviewResponse, Status } from "../src/shared/types";
+import { DEFAULT_CONTENT, type JobContent } from "../src/shared/hiring";
 
 mkdirSync(dirname(config.dbPath), { recursive: true });
 const db = new DatabaseSync(config.dbPath);
@@ -30,6 +31,17 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_app_tg ON applications(tg_id);
   CREATE INDEX IF NOT EXISTS idx_app_status ON applications(status);
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS admins (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    username        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash   TEXT NOT NULL,
+    role            TEXT NOT NULL DEFAULT 'hr',
+    active          INTEGER NOT NULL DEFAULT 1,
+    session_version INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL,
+    last_login_at   TEXT
+  );
 `);
 
 // Migrations for databases created before a column existed
@@ -39,6 +51,7 @@ for (const [name, type] of [
   ["response_note", "TEXT"],
   ["responded_at", "TEXT"],
   ["trial_start_at", "TEXT"],
+  ["decided_by", "TEXT"],
 ] as const) {
   if (!columns.has(name)) db.exec(`ALTER TABLE applications ADD COLUMN ${name} ${type}`);
 }
@@ -60,6 +73,7 @@ const toApp = (r: Row): Application => ({
   trialStartAt: (r.trial_start_at as string) ?? null,
   managerNote: (r.manager_note as string) ?? null,
   internalNote: (r.internal_note as string) ?? null,
+  decidedBy: (r.decided_by as string) ?? null,
   notified: Number(r.notified) === 1,
   interviewResponse: (r.interview_response as InterviewResponse) ?? null,
   responseNote: (r.response_note as string) ?? null,
@@ -111,27 +125,29 @@ export function countByStatus() {
 export function updateDecision(
   id: number,
   d: { status: Status; interviewAt?: string | null; interviewPlace?: string | null; managerNote?: string | null },
+  decidedBy: string | null = null,
 ) {
   db.prepare(
     `UPDATE applications SET status = ?, interview_at = ?, interview_place = ?, manager_note = ?, notified = 0,
-       interview_response = NULL, response_note = NULL, responded_at = NULL, trial_start_at = NULL, updated_at = ? WHERE id = ?`,
-  ).run(d.status, d.interviewAt ?? null, d.interviewPlace ?? null, d.managerNote ?? null, new Date().toISOString(), id);
+       interview_response = NULL, response_note = NULL, responded_at = NULL, trial_start_at = NULL, decided_by = ?,
+       updated_at = ? WHERE id = ?`,
+  ).run(d.status, d.interviewAt ?? null, d.interviewPlace ?? null, d.managerNote ?? null, decidedBy, new Date().toISOString(), id);
   return getApplication(id);
 }
 
 /** Reject, keeping interview/trial details so the message and history stay accurate. */
-export function reject(id: number, managerNote: string | null) {
+export function reject(id: number, managerNote: string | null, decidedBy: string | null = null) {
   db.prepare(
-    `UPDATE applications SET status = 'rejected', manager_note = ?, notified = 0, updated_at = ? WHERE id = ?`,
-  ).run(managerNote, new Date().toISOString(), id);
+    `UPDATE applications SET status = 'rejected', manager_note = ?, notified = 0, decided_by = ?, updated_at = ? WHERE id = ?`,
+  ).run(managerNote, decidedBy, new Date().toISOString(), id);
   return getApplication(id)!;
 }
 
 /** Move a candidate into the trial period. Interview details are kept for the record. */
-export function startTrial(id: number, trialStartAt: string, managerNote: string | null) {
+export function startTrial(id: number, trialStartAt: string, managerNote: string | null, decidedBy: string | null = null) {
   db.prepare(
-    `UPDATE applications SET status = 'trial', trial_start_at = ?, manager_note = ?, notified = 0, updated_at = ? WHERE id = ?`,
-  ).run(trialStartAt, managerNote, new Date().toISOString(), id);
+    `UPDATE applications SET status = 'trial', trial_start_at = ?, manager_note = ?, notified = 0, decided_by = ?, updated_at = ? WHERE id = ?`,
+  ).run(trialStartAt, managerNote, decidedBy, new Date().toISOString(), id);
   return getApplication(id)!;
 }
 
@@ -178,3 +194,95 @@ export function setSetting(key: string, value: string) {
 }
 
 export const isHiringOpen = () => getSetting("hiring_open", "1") === "1";
+
+/* ───────────────────────────── Job content ───────────────────────────── */
+
+export function getContent(): JobContent {
+  const raw = getSetting("job_content", "");
+  if (!raw) return DEFAULT_CONTENT;
+  try {
+    return { ...DEFAULT_CONTENT, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_CONTENT;
+  }
+}
+
+export function setContent(c: JobContent, editedBy: string) {
+  setSetting("job_content", JSON.stringify(c));
+  setSetting("job_content_meta", JSON.stringify({ editedBy, editedAt: new Date().toISOString() }));
+}
+
+export function getContentMeta(): { editedBy: string; editedAt: string } | null {
+  try {
+    return JSON.parse(getSetting("job_content_meta", "null"));
+  } catch {
+    return null;
+  }
+}
+
+/* ──────────────────────────────── Admins ──────────────────────────────── */
+
+export interface AdminRow extends AdminUser {
+  passwordHash: string;
+  sessionVersion: number;
+}
+
+const toAdmin = (r: Row): AdminRow => ({
+  id: Number(r.id),
+  name: r.name as string,
+  username: r.username as string,
+  role: r.role as AdminRole,
+  active: Number(r.active) === 1,
+  createdAt: r.created_at as string,
+  lastLoginAt: (r.last_login_at as string) ?? null,
+  passwordHash: r.password_hash as string,
+  sessionVersion: Number(r.session_version),
+});
+
+export const publicAdmin = ({ passwordHash: _p, sessionVersion: _s, ...a }: AdminRow): AdminUser => a;
+
+export function getAdmin(id: number) {
+  const r = db.prepare(`SELECT * FROM admins WHERE id = ?`).get(id) as Row | undefined;
+  return r ? toAdmin(r) : null;
+}
+
+export function getAdminByUsername(username: string) {
+  const r = db.prepare(`SELECT * FROM admins WHERE username = ?`).get(username) as Row | undefined;
+  return r ? toAdmin(r) : null;
+}
+
+export function listAdmins() {
+  return (db.prepare(`SELECT * FROM admins ORDER BY role = 'owner' DESC, created_at`).all() as Row[]).map(toAdmin);
+}
+
+export function createAdmin(a: { name: string; username: string; passwordHash: string; role: AdminRole }) {
+  const res = db
+    .prepare(`INSERT INTO admins (name, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run(a.name, a.username, a.passwordHash, a.role, new Date().toISOString());
+  return getAdmin(Number(res.lastInsertRowid))!;
+}
+
+export function updateAdmin(id: number, patch: { name?: string; passwordHash?: string; active?: boolean }) {
+  const cur = getAdmin(id);
+  if (!cur) return null;
+  // A new password or blocking signs the person out everywhere
+  const bump = patch.passwordHash !== undefined || patch.active === false ? 1 : 0;
+  db.prepare(
+    `UPDATE admins SET name = ?, password_hash = ?, active = ?, session_version = session_version + ? WHERE id = ?`,
+  ).run(
+    patch.name ?? cur.name,
+    patch.passwordHash ?? cur.passwordHash,
+    patch.active === undefined ? (cur.active ? 1 : 0) : patch.active ? 1 : 0,
+    bump,
+    id,
+  );
+  return getAdmin(id);
+}
+
+export function deleteAdmin(id: number) {
+  db.prepare(`DELETE FROM admins WHERE id = ? AND role != 'owner'`).run(id);
+}
+
+export function touchLogin(id: number) {
+  db.prepare(`UPDATE admins SET last_login_at = ? WHERE id = ?`).run(new Date().toISOString(), id);
+}

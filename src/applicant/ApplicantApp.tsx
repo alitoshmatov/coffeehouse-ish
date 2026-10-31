@@ -3,12 +3,13 @@ import { Coffee, Loader2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { tg } from "@/lib/telegram";
 import type { MyApplication } from "@/shared/types";
+import type { JobContent } from "@/shared/hiring";
 import { JobIntro } from "./JobIntro";
 import { ApplyForm } from "./ApplyForm";
 import { StatusView } from "./StatusView";
 
 type Screen = "intro" | "form" | "status";
-type Me = { hiringOpen: boolean; application: MyApplication | null };
+type Me = { hiringOpen: boolean; content: JobContent; application: MyApplication | null };
 
 // The bot's "Boshqa vaqt so‘rash" button opens the app with ?reschedule=1
 const startWithReschedule = new URLSearchParams(window.location.search).has("reschedule");
@@ -52,6 +53,7 @@ export default function ApplicantApp() {
     return (
       <StatusView
         application={me.application}
+        content={me.content}
         canReapply={me.hiringOpen && me.application.status === "rejected"}
         onReapply={() => setScreen("intro")}
         onRefresh={load}
@@ -66,6 +68,7 @@ export default function ApplicantApp() {
   if (screen === "form")
     return (
       <ApplyForm
+        branchName={me.content.branchName}
         onDone={(application) => {
           setMe({ ...me, application });
           setScreen("status");
@@ -74,7 +77,7 @@ export default function ApplicantApp() {
       />
     );
 
-  return <JobIntro onApply={() => { setScreen("form"); window.scrollTo(0, 0); }} />;
+  return <JobIntro content={me.content} onApply={() => { setScreen("form"); window.scrollTo(0, 0); }} />;
 }
 
 function Centered({ title, text, loading, action }: { title?: string; text?: string; loading?: boolean; action?: { label: string; onClick: () => void } }) {

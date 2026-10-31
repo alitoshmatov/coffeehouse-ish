@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { AlertTriangle, ArrowLeft, BadgeCheck, CalendarCheck, CheckCircle2, Loader2, Phone, RotateCcw, Send, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { BRANCH_ADDRESS, BRANCH_NAME } from "@/shared/hiring";
 import { formatInterview, formatStamp } from "@/shared/format";
 import type { Application, Status } from "@/shared/types";
 import { StatusBadge } from "@/ui/StatusBadge";
@@ -9,7 +8,6 @@ import { StatusBadge } from "@/ui/StatusBadge";
 type Mode = "idle" | "interview" | "trial" | "reject";
 type DecisionRes = { application: Application; delivered: boolean | null };
 
-const DEFAULT_PLACE = `${BRANCH_NAME}, ${BRANCH_ADDRESS}`;
 
 /** Tomorrow in Tashkent time, as yyyy-mm-dd. */
 function tomorrow() {
@@ -18,7 +16,17 @@ function tomorrow() {
 }
 const todayTashkent = () => new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
 
-export function Detail({ application: a, onBack, onChange }: { application: Application; onBack: () => void; onChange: (a: Application) => void }) {
+export function Detail({
+  application: a,
+  defaultPlace: DEFAULT_PLACE,
+  onBack,
+  onChange,
+}: {
+  application: Application;
+  defaultPlace: string;
+  onBack: () => void;
+  onChange: (a: Application) => void;
+}) {
   const [mode, setMode] = useState<Mode>("idle");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -26,7 +34,7 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
 
   const [date, setDate] = useState(a.interviewAt?.slice(0, 10) ?? tomorrow());
   const [time, setTime] = useState(a.interviewAt?.slice(11, 16) ?? "10:00");
-  const [place, setPlace] = useState(a.interviewPlace ?? DEFAULT_PLACE);
+  const [place, setPlace] = useState(a.interviewPlace ?? "");
   const [trialDate, setTrialDate] = useState(a.trialStartAt?.slice(0, 10) ?? tomorrow());
   const [trialTime, setTrialTime] = useState(a.trialStartAt?.slice(11, 16) ?? "05:00");
   const [message, setMessage] = useState("");
@@ -165,6 +173,11 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
               {a.respondedAt && <span className="block text-xs font-normal opacity-70">{formatStamp(a.respondedAt)}</span>}
             </p>
           )}
+          {a.decidedBy && (
+            <p className="mt-1 text-xs text-bean/55">
+              Qaror: {a.decidedBy} · {formatStamp(a.updatedAt)}
+            </p>
+          )}
           <p className={`mt-1 flex flex-wrap items-center gap-x-3 ${a.notified ? "text-emerald-700" : "text-amber-700"}`}>
             {a.notified ? "✓ Nomzodga xabar yuborilgan" : "Nomzodga xabar yetib bormagan"}
             {!a.notified && (
@@ -257,8 +270,10 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
               </label>
             </div>
             <label className="block text-sm">
-              <span className="mb-1 block font-medium">Manzil</span>
-              <input value={place} onChange={(e) => setPlace(e.target.value)} maxLength={200} className="field py-2.5" />
+              <span className="mb-1 block font-medium">
+                  Manzil <span className="font-normal text-bean/50">(bo‘sh qolsa — filial manzili)</span>
+                </span>
+              <input value={place} onChange={(e) => setPlace(e.target.value)} placeholder={DEFAULT_PLACE} maxLength={200} className="field py-2.5" />
             </label>
             <label className="block text-sm">
               <span className="mb-1 block font-medium">

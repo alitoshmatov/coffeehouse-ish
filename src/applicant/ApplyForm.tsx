@@ -3,7 +3,6 @@ import { AlertCircle, Loader2, Phone } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { ensureWriteAccess, haptic, requestPhone, tg } from "@/lib/telegram";
 import { LIMITS, validateInput, type ApplicationInput, type MyApplication } from "@/shared/types";
-import { BRANCH_NAME } from "@/shared/hiring";
 import { BottomBar } from "./BottomBar";
 
 type Draft = { fullName: string; phone: string; age: string; currentDuties: string; experience: string; whyUs: string };
@@ -29,7 +28,7 @@ function initialDraft(): Draft {
   };
 }
 
-export function ApplyForm({ onDone }: { onDone: (a: MyApplication) => void }) {
+export function ApplyForm({ branchName, onDone }: { branchName: string; onDone: (a: MyApplication) => void }) {
   const [d, setD] = useState<Draft>(initialDraft);
   const [touched, setTouched] = useState<Partial<Record<Key, boolean>>>({});
   const [submitted, setSubmitted] = useState(false);
@@ -98,7 +97,7 @@ export function ApplyForm({ onDone }: { onDone: (a: MyApplication) => void }) {
     <main className="px-5 pt-6 pb-32">
       <h1 className="font-poster uppercase text-3xl font-bold">Ariza</h1>
       <p className="mt-1 text-bean/70">
-        {BRANCH_NAME} · <span className="text-ember">*</span> majburiy
+        {branchName} · <span className="text-ember">*</span> majburiy
       </p>
 
       <form ref={formRef} onSubmit={submit} noValidate className="mt-6 space-y-5">

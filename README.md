@@ -65,11 +65,22 @@ Use a **separate test bot** for local development. If you run `npm run dev` with
 production token, the local server switches the bot to polling and production stops
 receiving updates until its next restart.
 
+## Admins
+
+- **Main admin:** login `admin`, password = `ADMIN_PASSWORD` from Coolify. To change it, edit the
+  env var and redeploy. The main admin can't be blocked or deleted.
+- **HR staff:** the main admin adds them under **Adminlar** (name, login, generated password),
+  and can reset a password, block or delete them. A new password or a block logs that person out at once.
+- HR can do everything with applications and edit **Ish shartlari**; only the main admin manages admins.
+- Each decision records who made it ("Qaror: Malika · 31-oktabr, 14:05").
+
 ## Everyday use
 
 - **Open/close hiring:** the "Qabul ochiq / yopiq" switch in the panel header. When closed, the mini app shows a "closed" screen and new applications are refused.
-- **Change the job text** (salary, hours, terms): `src/shared/hiring.ts`, then redeploy.
-  Keep it in sync with `ch-landing/src/pages/barista-hiring/data.ts`.
+- **Change the job text** (title, salary, hours, terms, branch): **Ish shartlari** page in the panel —
+  with a live phone preview; applicants see it right after saving, no redeploy.
+  `src/shared/hiring.ts` only holds the defaults used before the first save.
+  The landing site (`ch-landing`) has its own copy of this text — update it there too.
 - **"Xabar yetib bormagan"**: the candidate blocked the bot or never pressed Start. Use "Qayta yuborish" or call them.
 - **Backup:** copy `/data/ish.db` (SQLite).
 
@@ -80,7 +91,10 @@ receiving updates until its next restart.
 | GET | `/api/me` | candidate — own latest application + whether hiring is open |
 | POST | `/api/apply` | candidate — submit (one active application per Telegram account) |
 | POST | `/api/interview/respond` | candidate — `{response: "confirmed"}` or `{response: "reschedule", note}` |
-| POST | `/api/admin/login` / `logout`, GET `/api/admin/session` | manager |
+| POST | `/api/admin/login` `{username, password}` / `logout`, GET `/api/admin/session` | any admin |
+| GET / PUT | `/api/admin/content` | any admin — job content |
+| GET / POST | `/api/admin/admins` | main admin — list / create HR `{name, username, password}` |
+| PATCH / DELETE | `/api/admin/admins/:id` | main admin — `{name?, password?, active?}` / delete HR |
 | GET | `/api/admin/applications` | manager — all applications + counts |
 | POST | `/api/admin/applications/:id/decision` | manager — `{status: "interview", interviewAt: "2026-11-03T10:00", interviewPlace?, managerNote?}` / `{status: "trial", trialStartAt, managerNote?}` (only after interview) / `{status: "rejected", managerNote?}` / `{status: "new"}` (undo, no message) |
 | POST | `/api/admin/applications/:id/resend` | manager — resend the decision message |

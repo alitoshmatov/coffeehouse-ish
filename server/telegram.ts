@@ -2,7 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
 import { Bot, InlineKeyboard } from "grammy";
 import { config } from "./config";
-import { BRANCH_ADDRESS, BRANCH_NAME } from "../src/shared/hiring";
+import { branchLine } from "../src/shared/hiring";
 import { formatInterview } from "../src/shared/format";
 import type { Application, InterviewResponse } from "../src/shared/types";
 import * as db from "./db";
@@ -50,7 +50,7 @@ const appButton = (text: string) => new InlineKeyboard().webApp(text, `${config.
 
 bot.command("start", (ctx) =>
   ctx.reply(
-    `Assalomu alaykum! ☕️\n\n<b>${BRANCH_NAME}</b> yangi filialiga barista qidiryapmiz.\n` +
+    `Assalomu alaykum! ☕️\n\n<b>${esc(db.getContent().branchName)}</b> filialiga barista qidiryapmiz.\n` +
       `Shartlar bilan tanishib, ariza yuboring — natijani shu yerda xabar qilamiz.`,
     { parse_mode: "HTML", reply_markup: appButton("📝 Ariza topshirish") },
   ),
@@ -190,7 +190,7 @@ export async function notifyApplicant(a: Application): Promise<boolean> {
       `Assalomu alaykum, ${first}! 🎉\n\n` +
       `Arizangiz ko‘rib chiqildi — sizni <b>suhbatga</b> taklif qilamiz.\n\n` +
       (a.interviewAt ? `🗓 <b>Vaqt:</b> ${esc(formatInterview(a.interviewAt))}\n` : "") +
-      `📍 <b>Manzil:</b> ${esc(a.interviewPlace || `${BRANCH_NAME}, ${BRANCH_ADDRESS}`)}\n` +
+      `📍 <b>Manzil:</b> ${esc(a.interviewPlace || branchLine(db.getContent()))}\n` +
       (a.managerNote ? `\n${esc(a.managerNote)}\n` : "") +
       `\nKela olasizmi? Quyidagi tugma orqali javob bering.`;
   } else if (a.status === "trial") {
@@ -198,7 +198,7 @@ export async function notifyApplicant(a: Application): Promise<boolean> {
       `Tabriklaymiz, ${first}! 🎉☕️\n\n` +
       `Suhbatdan muvaffaqiyatli o‘tdingiz — sizni <b>30 kunlik sinov muddatiga</b> qabul qilamiz.\n\n` +
       (a.trialStartAt ? `🗓 <b>Birinchi ish kuni:</b> ${esc(formatInterview(a.trialStartAt))}\n` : "") +
-      `📍 <b>Filial:</b> ${esc(`${BRANCH_NAME}, ${BRANCH_ADDRESS}`)}\n` +
+      `📍 <b>Filial:</b> ${esc(branchLine(db.getContent()))}\n` +
       (a.managerNote ? `\n${esc(a.managerNote)}\n` : "") +
       `\nSinov muddatida ham oylik to‘lanadi. Ishni yaxshi o‘rgansangiz, doimiy ishga olinasiz. Omad!`;
   } else if (a.status === "rejected" && a.trialStartAt) {

@@ -11,6 +11,19 @@ export const STATUS_LABEL: Record<Status, string> = {
   rejected: "Rad etilgan",
 };
 
+export type AdminRole = "owner" | "hr";
+export const ROLE_LABEL: Record<AdminRole, string> = { owner: "Bosh admin", hr: "HR" };
+
+export interface AdminUser {
+  id: number;
+  name: string;
+  username: string;
+  role: AdminRole;
+  active: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
 /** What the applicant fills in. */
 export interface ApplicationInput {
   fullName: string;
@@ -31,6 +44,7 @@ export interface Application extends ApplicationInput {
   trialStartAt: string | null; // first trial work day, "2026-11-10T05:00" Tashkent time
   managerNote: string | null; // shown to the applicant in the bot message
   internalNote: string | null; // manager-only
+  decidedBy: string | null; // name of the admin who made the last decision
   notified: boolean; // bot message delivered
   interviewResponse: InterviewResponse | null; // null = no answer yet
   responseNote: string | null; // preferred time when asking to reschedule
@@ -40,7 +54,7 @@ export interface Application extends ApplicationInput {
 }
 
 /** Applicant's own view — no internal notes. */
-export type MyApplication = Omit<Application, "internalNote" | "tgId">;
+export type MyApplication = Omit<Application, "internalNote" | "tgId" | "decidedBy">;
 
 export const LIMITS = { responseNote: 300, text: 600, name: 80, phone: 20, minAge: 18, maxAge: 70 };
 

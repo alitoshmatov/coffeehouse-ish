@@ -1,5 +1,5 @@
 import { CalendarDays, Check, Clock, MapPin, PartyPopper, RefreshCw, X } from "lucide-react";
-import { BRANCH_ADDRESS, BRANCH_NAME } from "@/shared/hiring";
+import { branchLine, type JobContent } from "@/shared/hiring";
 import { formatInterview, formatStamp } from "@/shared/format";
 import type { MyApplication } from "@/shared/types";
 import { BottomBar } from "./BottomBar";
@@ -9,6 +9,7 @@ type Step = { label: string; state: "done" | "current" | "todo" | "rejected"; no
 
 export function StatusView({
   application: a,
+  content,
   canReapply,
   onReapply,
   onRefresh,
@@ -16,6 +17,7 @@ export function StatusView({
   startWithReschedule,
 }: {
   application: MyApplication;
+  content: JobContent;
   canReapply: boolean;
   onReapply: () => void;
   onRefresh: () => void;
@@ -82,7 +84,7 @@ export function StatusView({
           )}
           <p className="flex gap-3">
             <MapPin className="w-5 h-5 mt-0.5 shrink-0 text-ember" aria-hidden />
-            <span>{a.interviewPlace || `${BRANCH_NAME}, ${BRANCH_ADDRESS}`}</span>
+            <span>{a.interviewPlace || branchLine(content)}</span>
           </p>
           {a.managerNote && <p className="border-t border-line pt-3 text-bean/80 leading-relaxed">{a.managerNote}</p>}
         </div>
@@ -100,7 +102,7 @@ export function StatusView({
           )}
           <p className="flex gap-3">
             <MapPin className="w-5 h-5 mt-0.5 shrink-0 text-ember" aria-hidden />
-            <span>{`${BRANCH_NAME}, ${BRANCH_ADDRESS}`}</span>
+            <span>{branchLine(content)}</span>
           </p>
           {a.managerNote && <p className="border-t border-line pt-3 text-bean/80 leading-relaxed">{a.managerNote}</p>}
         </div>

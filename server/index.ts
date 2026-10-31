@@ -13,8 +13,23 @@ import {
   WEBHOOK_PATH,
   type TgUser,
 } from "./telegram";
-import { checkPassword, clearSession, isAdmin, issueSession, loginLimiter, requireAdmin } from "./auth";
+import {
+  clearSession,
+  currentAdmin,
+  ensureOwner,
+  hashPassword,
+  issueSession,
+  loginLimiter,
+  requireAdmin,
+  requireOwner,
+  resetLimiter,
+  verifyPassword,
+  type AdminReq,
+} from "./auth";
+import { validateContent } from "../src/shared/hiring";
 import { LIMITS, STATUSES, validateInput, type Application, type MyApplication, type Status } from "../src/shared/types";
+
+ensureOwner();
 
 const app = express();
 app.set("trust proxy", 1);
@@ -35,7 +50,7 @@ const forApplicant = ({ internalNote: _i, tgId: _t, ...rest }: Application): MyA
 
 app.get("/api/me", requireTelegram, (req: TgReq, res) => {
   const latest = db.latestForUser(req.tgUser!.id);
-  res.json({ hiringOpen: db.isHiringOpen(), application: latest ? forApplicant(latest) : null });
+  res.json({ hiringOpen: db.isHiringOpen(), content: db.getContent(), application: latest ? forApplicant(latest) : null });
 });
 
 app.post("/api/apply", requireTelegram, async (req: TgReq, res) => {
@@ -74,9 +89,15 @@ app.post("/api/interview/respond", requireTelegram, async (req: TgReq, res) => {
 /* ───────────────────────────────── Manager panel ───────────────────────────────── */
 
 app.post("/api/admin/login", loginLimiter, (req, res) => {
-  if (!checkPassword(String(req.body?.password ?? ""))) return res.status(401).json({ error: "Parol noto‘g‘ri." });
-  issueSession(res);
-  res.json({ ok: true });
+  const username = String(req.body?.username ?? "").trim();
+  const password = String(req.body?.password ?? "");
+  const admin = username ? db.getAdminByUsername(username) : null;
+  if (!admin || !admin.active || !verifyPassword(password, admin.passwordHash))
+    return res.status(401).json({ error: "Login yoki parol noto‘g‘ri." });
+  resetLimiter(req);
+  db.touchLogin(admin.id);
+  issueSession(res, admin);
+  res.json({ admin: db.publicAdmin(admin) });
 });
 
 app.post("/api/admin/logout", (_req, res) => {
@@ -84,7 +105,10 @@ app.post("/api/admin/logout", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/admin/session", (req, res) => res.json({ ok: isAdmin(req) }));
+app.get("/api/admin/session", (req, res) => {
+  const admin = currentAdmin(req);
+  res.json({ admin: admin ? db.publicAdmin(admin) : null });
+});
 
 app.get("/api/admin/applications", requireAdmin, (req, res) => {
   const s = req.query.status as Status | undefined;
@@ -99,7 +123,8 @@ app.get("/api/admin/applications", requireAdmin, (req, res) => {
 
 const LOCAL_DT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
-app.post("/api/admin/applications/:id/decision", requireAdmin, async (req, res) => {
+app.post("/api/admin/applications/:id/decision", requireAdmin, async (req: AdminReq, res) => {
+  const by = req.admin!.name;
   const id = Number(req.params.id);
   const current = db.getApplication(id);
   if (!current) return res.status(404).json({ error: "Ariza topilmadi." });
@@ -111,18 +136,18 @@ app.post("/api/admin/applications/:id/decision", requireAdmin, async (req, res) 
     if (typeof interviewAt !== "string" || !LOCAL_DT.test(interviewAt))
       return res.status(400).json({ error: "Suhbat sanasi va vaqtini tanlang." });
     const place = typeof interviewPlace === "string" ? interviewPlace.trim().slice(0, 200) : "";
-    db.updateDecision(id, { status, interviewAt, interviewPlace: place || null, managerNote: note || null });
+    db.updateDecision(id, { status, interviewAt, interviewPlace: place || null, managerNote: note || null }, by);
   } else if (status === "trial") {
     if (current.status !== "interview" && current.status !== "trial")
       return res.status(400).json({ error: "Sinov muddatiga faqat suhbatdan keyin qabul qilinadi." });
     const { trialStartAt } = req.body ?? {};
     if (typeof trialStartAt !== "string" || !LOCAL_DT.test(trialStartAt))
       return res.status(400).json({ error: "Birinchi ish kuni va vaqtini tanlang." });
-    db.startTrial(id, trialStartAt, note || null);
+    db.startTrial(id, trialStartAt, note || null, by);
   } else if (status === "rejected") {
-    db.reject(id, note || null);
+    db.reject(id, note || null, by);
   } else if (status === "new") {
-    db.updateDecision(id, { status }); // undo — no message is sent
+    db.updateDecision(id, { status }, by); // undo — no message is sent
     return res.json({ application: db.getApplication(id), delivered: null });
   } else {
     return res.status(400).json({ error: "Noto‘g‘ri holat." });
@@ -154,6 +179,66 @@ app.post("/api/admin/applications/:id/note", requireAdmin, (req, res) => {
 app.post("/api/admin/settings", requireAdmin, (req, res) => {
   if (typeof req.body?.hiringOpen === "boolean") db.setSetting("hiring_open", req.body.hiringOpen ? "1" : "0");
   res.json({ hiringOpen: db.isHiringOpen() });
+});
+
+/* Job content ("Ish shartlari") — every admin */
+
+app.get("/api/admin/content", requireAdmin, (_req, res) => {
+  res.json({ content: db.getContent(), meta: db.getContentMeta() });
+});
+
+app.put("/api/admin/content", requireAdmin, (req: AdminReq, res) => {
+  const r = validateContent(req.body?.content);
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  db.setContent(r.value, req.admin!.name);
+  res.json({ content: db.getContent(), meta: db.getContentMeta() });
+});
+
+/* Admin accounts — main admin only */
+
+const USERNAME = /^[a-z0-9._-]{3,32}$/i;
+const MIN_PASSWORD = 8;
+
+app.get("/api/admin/admins", requireAdmin, requireOwner, (_req, res) => {
+  res.json({ admins: db.listAdmins().map(db.publicAdmin) });
+});
+
+app.post("/api/admin/admins", requireAdmin, requireOwner, (req, res) => {
+  const name = String(req.body?.name ?? "").trim().slice(0, 60);
+  const username = String(req.body?.username ?? "").trim().toLowerCase();
+  const password = String(req.body?.password ?? "");
+  if (!name) return res.status(400).json({ error: "Ismini yozing." });
+  if (!USERNAME.test(username))
+    return res.status(400).json({ error: "Login 3–32 belgi: lotin harflari, raqamlar, nuqta, _ yoki -." });
+  if (password.length < MIN_PASSWORD) return res.status(400).json({ error: `Parol kamida ${MIN_PASSWORD} belgi bo‘lsin.` });
+  if (db.getAdminByUsername(username)) return res.status(409).json({ error: "Bu login band." });
+  const admin = db.createAdmin({ name, username, passwordHash: hashPassword(password), role: "hr" });
+  res.status(201).json({ admin: db.publicAdmin(admin) });
+});
+
+app.patch("/api/admin/admins/:id", requireAdmin, requireOwner, (req, res) => {
+  const target = db.getAdmin(Number(req.params.id));
+  if (!target) return res.status(404).json({ error: "Admin topilmadi." });
+  if (target.role === "owner")
+    return res.status(400).json({ error: "Bosh admin parolini Coolify’dagi ADMIN_PASSWORD orqali o‘zgartiring." });
+
+  const patch: { name?: string; passwordHash?: string; active?: boolean } = {};
+  if (typeof req.body?.name === "string" && req.body.name.trim()) patch.name = req.body.name.trim().slice(0, 60);
+  if (typeof req.body?.active === "boolean") patch.active = req.body.active;
+  if (typeof req.body?.password === "string") {
+    if (req.body.password.length < MIN_PASSWORD)
+      return res.status(400).json({ error: `Parol kamida ${MIN_PASSWORD} belgi bo‘lsin.` });
+    patch.passwordHash = hashPassword(req.body.password);
+  }
+  res.json({ admin: db.publicAdmin(db.updateAdmin(target.id, patch)!) });
+});
+
+app.delete("/api/admin/admins/:id", requireAdmin, requireOwner, (req, res) => {
+  const target = db.getAdmin(Number(req.params.id));
+  if (!target) return res.status(404).json({ error: "Admin topilmadi." });
+  if (target.role === "owner") return res.status(400).json({ error: "Bosh adminni o‘chirib bo‘lmaydi." });
+  db.deleteAdmin(target.id);
+  res.json({ ok: true });
 });
 
 app.post(WEBHOOK_PATH, handleWebhook);

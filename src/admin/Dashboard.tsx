@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Inbox, Loader2, LogOut, RefreshCw, Search } from "lucide-react";
+import { Inbox, Loader2, RefreshCw, Search } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { formatStamp } from "@/shared/format";
 import type { Application, Status } from "@/shared/types";
 import { StatusBadge } from "@/ui/StatusBadge";
 import { Detail } from "./Detail";
+import { branchLine, type JobContent } from "@/shared/hiring";
 
 type Tab = Status | "all";
 type ListRes = { applications: Application[]; counts: Record<Status, number>; rescheduleRequests: number; hiringOpen: boolean };
@@ -23,6 +24,13 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(() => Number(location.hash.slice(1)) || null);
   const [refreshing, setRefreshing] = useState(false);
+  const [defaultPlace, setDefaultPlace] = useState("");
+
+  useEffect(() => {
+    api<{ content: JobContent }>("/api/admin/content")
+      .then((r) => setDefaultPlace(branchLine(r.content)))
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -72,38 +80,28 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
     setData({ ...data, hiringOpen: r.hiringOpen });
   }
 
-  async function logout() {
-    await api("/api/admin/logout", { method: "POST" }).catch(() => {});
-    onLogout();
-  }
-
   const count = (t: Tab) => (!data ? 0 : t === "all" ? data.applications.length : data.counts[t]);
 
   return (
     <div className="min-h-dvh">
-      <header className="bg-ember text-foam">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-4 flex flex-wrap items-center gap-3">
-          <div className="mr-auto">
-            <h1 className="font-poster uppercase text-2xl font-bold leading-none">Barista arizalari</h1>
-            <p className="text-sm text-foam/70">Coffee House · menejer paneli</p>
-          </div>
-          {data && (
-            <button
-              onClick={toggleHiring}
-              className="inline-flex items-center gap-2 rounded-full border border-foam/30 px-3.5 py-1.5 text-sm hover:bg-foam/10"
-              aria-label={data.hiringOpen ? "Ariza qabuli ochiq, yopish" : "Ariza qabuli yopiq, ochish"}
-            >
-              <span className={`h-2 w-2 rounded-full ${data.hiringOpen ? "bg-emerald-400" : "bg-rose"}`} aria-hidden />
-              {data.hiringOpen ? "Qabul ochiq" : "Qabul yopiq"}
-            </button>
-          )}
-          <button onClick={logout} className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm hover:bg-foam/10">
-            <LogOut className="w-4 h-4" aria-hidden /> Chiqish
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-5 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="font-poster uppercase text-2xl font-bold">Barista arizalari</h1>
+        {data && (
+          <button
+            onClick={toggleHiring}
+            role="switch"
+            aria-checked={data.hiringOpen}
+            className="inline-flex items-center gap-2.5 rounded-full border border-line bg-white px-3.5 py-1.5 text-sm hover:bg-foam/50"
+          >
+            <span className={`relative h-5 w-9 rounded-full transition-colors ${data.hiringOpen ? "bg-emerald-500" : "bg-stone-300"}`} aria-hidden>
+              <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${data.hiringOpen ? "left-[18px]" : "left-0.5"}`} />
+            </span>
+            {data.hiringOpen ? "Ariza qabuli ochiq" : "Ariza qabuli yopiq"}
           </button>
-        </div>
-      </header>
+        )}
+      </div>
 
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 py-5 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-6">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 py-4 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-6">
         <section className={selected ? "hidden lg:block" : ""}>
           <div className="flex gap-1 overflow-x-auto rounded-full bg-white border border-line p-1" role="tablist">
             {TABS.map((t) => (
@@ -182,7 +180,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
         <section className={selected ? "" : "hidden lg:block"}>
           {selected ? (
-            <Detail key={selected.id} application={selected} onBack={() => setSelectedId(null)} onChange={replace} />
+            <Detail key={selected.id} application={selected} defaultPlace={defaultPlace} onBack={() => setSelectedId(null)} onChange={replace} />
           ) : (
             <div className="card h-full min-h-[320px] flex items-center justify-center text-bean/50">Arizani tanlang</div>
           )}
