@@ -5,15 +5,21 @@ panel where managers review applications and either invite to an interview
 or reject. The bot messages the candidate automatically either way.
 
 ```
-Candidate                         Manager (PUBLIC_URL/admin, password)
-─────────                         ───────────────────────────────────
-/start in the bot ─► mini app     sees new application (+ optional group ping)
-reads terms, fills the form  ───► Yangi
-                                  ├─ Suhbatga taklif: date, time, place, note
-sees status in the mini app  ◄──  │    → bot sends the invitation
-  + gets a bot message            └─ Rad etish: optional note
-                                       → bot sends a polite rejection
+Candidate (mini app + bot)              Manager (PUBLIC_URL/admin, password)
+──────────────────────────              ────────────────────────────────────
+/start ─► reads terms, applies   ───►   Yangi
+                                        ├─ Suhbatga taklif (date, time, place, note)
+bot: invitation + buttons        ◄───   │
+  ✅ Kelaman / 🕒 Boshqa vaqt     ───►   Suhbat: "Keladi" / "Boshqa vaqt so‘radi" (+ wish)
+                                        │    → Yangi vaqt belgilash re-sends the invite
+                                        ├─ Sinov muddatiga qabul qilish (first work day)
+bot: trial acceptance            ◄───   Sinov (30 kun)
+                                        └─ Rad etish (any stage; own wording during trial)
+bot: polite rejection            ◄───   Rad
 ```
+
+Statuses: `new` → `interview` → `trial`, or `rejected` at any point.
+"Yangiga qaytarish" undoes a decision without messaging the candidate.
 
 One Node process serves everything: the API, the static front end and the bot
 (long polling). Data lives in a single SQLite file.
@@ -67,9 +73,10 @@ Run only **one** instance — two instances would both poll the bot.
 |---|---|---|
 | GET | `/api/me` | candidate — own latest application + whether hiring is open |
 | POST | `/api/apply` | candidate — submit (one active application per Telegram account) |
+| POST | `/api/interview/respond` | candidate — `{response: "confirmed"}` or `{response: "reschedule", note}` |
 | POST | `/api/admin/login` / `logout`, GET `/api/admin/session` | manager |
 | GET | `/api/admin/applications` | manager — all applications + counts |
-| POST | `/api/admin/applications/:id/decision` | manager — `{status: "interview", interviewAt: "2026-11-03T10:00", interviewPlace?, managerNote?}` / `{status: "rejected", managerNote?}` / `{status: "new"}` (undo, no message) |
+| POST | `/api/admin/applications/:id/decision` | manager — `{status: "interview", interviewAt: "2026-11-03T10:00", interviewPlace?, managerNote?}` / `{status: "trial", trialStartAt, managerNote?}` (only after interview) / `{status: "rejected", managerNote?}` / `{status: "new"}` (undo, no message) |
 | POST | `/api/admin/applications/:id/resend` | manager — resend the decision message |
 | POST | `/api/admin/applications/:id/note` | manager — internal note (never shown to candidate) |
 | POST | `/api/admin/settings` | manager — `{hiringOpen: boolean}` |

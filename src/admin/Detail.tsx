@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { AlertTriangle, ArrowLeft, CalendarCheck, CheckCircle2, Loader2, Phone, RotateCcw, Send, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BadgeCheck, CalendarCheck, CheckCircle2, Loader2, Phone, RotateCcw, Send, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { BRANCH_ADDRESS, BRANCH_NAME } from "@/shared/hiring";
 import { formatInterview, formatStamp } from "@/shared/format";
 import type { Application, Status } from "@/shared/types";
 import { StatusBadge } from "@/ui/StatusBadge";
 
-type Mode = "idle" | "interview" | "reject";
+type Mode = "idle" | "interview" | "trial" | "reject";
 type DecisionRes = { application: Application; delivered: boolean | null };
 
 const DEFAULT_PLACE = `${BRANCH_NAME}, ${BRANCH_ADDRESS}`;
@@ -27,6 +27,8 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
   const [date, setDate] = useState(a.interviewAt?.slice(0, 10) ?? tomorrow());
   const [time, setTime] = useState(a.interviewAt?.slice(11, 16) ?? "10:00");
   const [place, setPlace] = useState(a.interviewPlace ?? DEFAULT_PLACE);
+  const [trialDate, setTrialDate] = useState(a.trialStartAt?.slice(0, 10) ?? tomorrow());
+  const [trialTime, setTrialTime] = useState(a.trialStartAt?.slice(11, 16) ?? "05:00");
   const [message, setMessage] = useState("");
   const [note, setNote] = useState(a.internalNote ?? "");
   const [noteSaved, setNoteSaved] = useState(true);
@@ -38,9 +40,11 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
       const body =
         status === "interview"
           ? { status, interviewAt: `${date}T${time}`, interviewPlace: place, managerNote: message }
-          : status === "rejected"
-            ? { status, managerNote: message }
-            : { status };
+          : status === "trial"
+            ? { status, trialStartAt: `${trialDate}T${trialTime}`, managerNote: message }
+            : status === "rejected"
+              ? { status, managerNote: message }
+              : { status };
       const r = await api<DecisionRes>(`/api/admin/applications/${a.id}/decision`, { body });
       onChange(r.application);
       setMode("idle");
@@ -127,6 +131,12 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
 
       {a.status !== "new" && (
         <div className="mx-5 mb-4 rounded-xl bg-foam/50 px-4 py-3 text-sm">
+          {a.status === "trial" && a.trialStartAt && (
+            <p className="font-semibold">Sinov muddati boshlanishi: {formatInterview(a.trialStartAt)}</p>
+          )}
+          {a.status === "trial" && a.interviewAt && (
+            <p className="text-bean/60">Suhbat bo‘lgan: {formatInterview(a.interviewAt)}</p>
+          )}
           {a.status === "interview" && a.interviewAt && (
             <p className="font-semibold">
               Suhbat: {formatInterview(a.interviewAt)}
@@ -134,6 +144,27 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
           )}
           {a.status === "interview" && <p className="text-bean/70">{a.interviewPlace || DEFAULT_PLACE}</p>}
           {a.managerNote && <p className="mt-1 text-bean/70">Xabar: “{a.managerNote}”</p>}
+          {a.status === "interview" && (
+            <p
+              className={`mt-2 rounded-lg px-3 py-2 font-medium ${
+                a.interviewResponse === "confirmed"
+                  ? "bg-emerald-100 text-emerald-900"
+                  : a.interviewResponse === "reschedule"
+                    ? "bg-amber-100 text-amber-950"
+                    : "bg-white text-bean/60"
+              }`}
+            >
+              {a.interviewResponse === "confirmed" && "✓ Nomzod kelishini tasdiqladi"}
+              {a.interviewResponse === "reschedule" && (
+                <>
+                  🕒 Nomzod boshqa vaqt so‘radi
+                  {a.responseNote && <span className="block font-normal">“{a.responseNote}”</span>}
+                </>
+              )}
+              {!a.interviewResponse && "Nomzod hali javob bermadi"}
+              {a.respondedAt && <span className="block text-xs font-normal opacity-70">{formatStamp(a.respondedAt)}</span>}
+            </p>
+          )}
           <p className={`mt-1 flex flex-wrap items-center gap-x-3 ${a.notified ? "text-emerald-700" : "text-amber-700"}`}>
             {a.notified ? "✓ Nomzodga xabar yuborilgan" : "Nomzodga xabar yetib bormagan"}
             {!a.notified && (
@@ -167,18 +198,29 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
       <div className="border-t border-line bg-cream/60 px-5 py-4">
         {mode === "idle" && (
           <div className="flex flex-wrap gap-2">
-            {a.status !== "interview" && (
-              <button onClick={() => setMode("interview")} className="btn-primary flex-1 min-w-[12rem] whitespace-nowrap">
+            {(a.status === "interview" || a.status === "trial") && (
+              <button
+                onClick={() => setMode("trial")}
+                className={`${a.status === "interview" && a.interviewResponse !== "reschedule" ? "btn-primary" : "btn-ghost"} flex-auto whitespace-nowrap`}
+              >
+                <BadgeCheck className="w-4 h-4" aria-hidden /> {a.status === "trial" ? "Boshlanish sanasini o‘zgartirish" : "Sinov muddatiga qabul qilish"}
+              </button>
+            )}
+            {(a.status === "new" || a.status === "rejected") && (
+              <button onClick={() => setMode("interview")} className="btn-primary flex-auto whitespace-nowrap">
                 <CalendarCheck className="w-4 h-4" aria-hidden /> Suhbatga taklif qilish
               </button>
             )}
             {a.status === "interview" && (
-              <button onClick={() => setMode("interview")} className="btn-ghost flex-1 min-w-[12rem] whitespace-nowrap">
-                <CalendarCheck className="w-4 h-4" aria-hidden /> Vaqtni o‘zgartirish
+              <button
+                onClick={() => setMode("interview")}
+                className={`${a.interviewResponse === "reschedule" ? "btn-primary" : "btn-ghost"} flex-auto whitespace-nowrap`}
+              >
+                <CalendarCheck className="w-4 h-4" aria-hidden /> {a.interviewResponse === "reschedule" ? "Yangi vaqt belgilash" : "Vaqtni o‘zgartirish"}
               </button>
             )}
             {a.status !== "rejected" && (
-              <button onClick={() => setMode("reject")} className="btn-ghost flex-1 min-w-[10rem] text-red-700">
+              <button onClick={() => setMode("reject")} className="btn-ghost flex-auto whitespace-nowrap text-red-700">
                 <X className="w-4 h-4" aria-hidden /> Rad etish
               </button>
             )}
@@ -199,6 +241,11 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
             className="space-y-3"
           >
             <h3 className="font-semibold">Suhbatga taklif</h3>
+            {a.interviewResponse === "reschedule" && a.responseNote && (
+              <p className="rounded-lg bg-amber-100 px-3 py-2 text-sm text-amber-950">
+                Nomzod so‘ragan vaqt: “{a.responseNote}”
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <label className="text-sm">
                 <span className="mb-1 block font-medium">Sana</span>
@@ -223,8 +270,46 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
               Assalomu alaykum, {first}! 🎉 Arizangiz ko‘rib chiqildi — sizni suhbatga taklif qilamiz.{" "}
               <b>Vaqt:</b> {date && time ? formatInterview(`${date}T${time}`) : "—"}. <b>Manzil:</b> {place || DEFAULT_PLACE}.
               {message && ` ${message}`}
+              <span className="mt-2 flex gap-2 text-xs">
+                <span className="rounded-md border border-line px-2 py-1">✅ Kelaman</span>
+                <span className="rounded-md border border-line px-2 py-1">🕒 Boshqa vaqt so‘rash</span>
+              </span>
             </Preview>
             <Actions busy={busy} error={error} onCancel={() => setMode("idle")} label="Taklif yuborish" />
+          </form>
+        )}
+
+        {mode === "trial" && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              decide("trial");
+            }}
+            className="space-y-3"
+          >
+            <h3 className="font-semibold">Sinov muddatiga qabul qilish (30 kun)</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-sm">
+                <span className="mb-1 block font-medium">Birinchi ish kuni</span>
+                <input type="date" required min={todayTashkent()} value={trialDate} onChange={(e) => setTrialDate(e.target.value)} className="field py-2.5" />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block font-medium">Kelish vaqti</span>
+                <input type="time" required step={900} value={trialTime} onChange={(e) => setTrialTime(e.target.value)} className="field py-2.5" />
+              </label>
+            </div>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">
+                Qo‘shimcha xabar <span className="font-normal text-bean/50">(ixtiyoriy)</span>
+              </span>
+              <textarea rows={2} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Masalan: qora shim va qulay oyoq kiyimda keling" className="field resize-none py-2.5" />
+            </label>
+            <Preview>
+              Tabriklaymiz, {first}! 🎉 Suhbatdan muvaffaqiyatli o‘tdingiz — sizni 30 kunlik sinov muddatiga qabul qilamiz.{" "}
+              <b>Birinchi ish kuni:</b> {trialDate && trialTime ? formatInterview(`${trialDate}T${trialTime}`) : "—"}.{" "}
+              <b>Filial:</b> {DEFAULT_PLACE}.{message && ` ${message}`} Sinov muddatida ham oylik to‘lanadi.
+            </Preview>
+            <Actions busy={busy} error={error} onCancel={() => setMode("idle")} label="Qabul qilish va xabar yuborish" />
           </form>
         )}
 
@@ -236,7 +321,7 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
             }}
             className="space-y-3"
           >
-            <h3 className="font-semibold">Arizani rad etish</h3>
+            <h3 className="font-semibold">{a.status === "trial" ? "Sinov muddatini to‘xtatish" : "Arizani rad etish"}</h3>
             <label className="block text-sm">
               <span className="mb-1 block font-medium">
                 Nomzodga izoh <span className="font-normal text-bean/50">(ixtiyoriy, nomzod ko‘radi)</span>
@@ -244,8 +329,17 @@ export function Detail({ application: a, onBack, onChange }: { application: Appl
               <textarea rows={2} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)} className="field resize-none py-2.5" />
             </label>
             <Preview>
-              Assalomu alaykum, {first}. Coffee House’ga qiziqish bildirganingiz uchun rahmat. Afsuski, bu safar boshqa nomzodni tanladik.
-              {message && ` ${message}`} Yangi o‘rin ochilganda yana ariza topshirishingiz mumkin. Omad!
+              {a.status === "trial" ? (
+                <>
+                  Assalomu alaykum, {first}. Sinov muddatida ishlaganingiz uchun rahmat. Afsuski, natijalarga ko‘ra hamkorlikni davom ettira olmaymiz.
+                  {message && ` ${message}`} Ishlagan kunlaringiz uchun oylik kelishilganidek to‘lanadi. Omad!
+                </>
+              ) : (
+                <>
+                  Assalomu alaykum, {first}. Coffee House’ga qiziqish bildirganingiz uchun rahmat. Afsuski, bu safar boshqa nomzodni tanladik.
+                  {message && ` ${message}`} Yangi o‘rin ochilganda yana ariza topshirishingiz mumkin. Omad!
+                </>
+              )}
             </Preview>
             <Actions busy={busy} error={error} onCancel={() => setMode("idle")} label="Rad etish va xabar yuborish" danger />
           </form>

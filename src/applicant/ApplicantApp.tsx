@@ -10,6 +10,9 @@ import { StatusView } from "./StatusView";
 type Screen = "intro" | "form" | "status";
 type Me = { hiringOpen: boolean; application: MyApplication | null };
 
+// The bot's "Boshqa vaqt so‘rash" button opens the app with ?reschedule=1
+const startWithReschedule = new URLSearchParams(window.location.search).has("reschedule");
+
 export default function ApplicantApp() {
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState("");
@@ -52,6 +55,8 @@ export default function ApplicantApp() {
         canReapply={me.hiringOpen && me.application.status === "rejected"}
         onReapply={() => setScreen("intro")}
         onRefresh={load}
+        onUpdate={(application) => setMe({ ...me, application })}
+        startWithReschedule={startWithReschedule}
       />
     );
 

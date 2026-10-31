@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config";
-import type { Application, ApplicationInput, Status } from "../src/shared/types";
+import type { Application, ApplicationInput, InterviewResponse, Status } from "../src/shared/types";
 
 mkdirSync(dirname(config.dbPath), { recursive: true });
 const db = new DatabaseSync(config.dbPath);
@@ -32,6 +32,17 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `);
 
+// Migrations for databases created before a column existed
+const columns = new Set((db.prepare(`PRAGMA table_info(applications)`).all() as { name: string }[]).map((c) => c.name));
+for (const [name, type] of [
+  ["interview_response", "TEXT"],
+  ["response_note", "TEXT"],
+  ["responded_at", "TEXT"],
+  ["trial_start_at", "TEXT"],
+] as const) {
+  if (!columns.has(name)) db.exec(`ALTER TABLE applications ADD COLUMN ${name} ${type}`);
+}
+
 type Row = Record<string, unknown>;
 const toApp = (r: Row): Application => ({
   id: Number(r.id),
@@ -46,9 +57,13 @@ const toApp = (r: Row): Application => ({
   status: r.status as Status,
   interviewAt: (r.interview_at as string) ?? null,
   interviewPlace: (r.interview_place as string) ?? null,
+  trialStartAt: (r.trial_start_at as string) ?? null,
   managerNote: (r.manager_note as string) ?? null,
   internalNote: (r.internal_note as string) ?? null,
   notified: Number(r.notified) === 1,
+  interviewResponse: (r.interview_response as InterviewResponse) ?? null,
+  responseNote: (r.response_note as string) ?? null,
+  respondedAt: (r.responded_at as string) ?? null,
   createdAt: r.created_at as string,
   updatedAt: r.updated_at as string,
 });
@@ -88,7 +103,7 @@ export function listApplications(status?: Status) {
 
 export function countByStatus() {
   const rows = db.prepare(`SELECT status, COUNT(*) AS n FROM applications GROUP BY status`).all() as Row[];
-  const out: Record<Status, number> = { new: 0, interview: 0, rejected: 0 };
+  const out: Record<Status, number> = { new: 0, interview: 0, trial: 0, rejected: 0 };
   for (const r of rows) out[r.status as Status] = Number(r.n);
   return out;
 }
@@ -98,9 +113,43 @@ export function updateDecision(
   d: { status: Status; interviewAt?: string | null; interviewPlace?: string | null; managerNote?: string | null },
 ) {
   db.prepare(
-    `UPDATE applications SET status = ?, interview_at = ?, interview_place = ?, manager_note = ?, notified = 0, updated_at = ? WHERE id = ?`,
+    `UPDATE applications SET status = ?, interview_at = ?, interview_place = ?, manager_note = ?, notified = 0,
+       interview_response = NULL, response_note = NULL, responded_at = NULL, trial_start_at = NULL, updated_at = ? WHERE id = ?`,
   ).run(d.status, d.interviewAt ?? null, d.interviewPlace ?? null, d.managerNote ?? null, new Date().toISOString(), id);
   return getApplication(id);
+}
+
+/** Reject, keeping interview/trial details so the message and history stay accurate. */
+export function reject(id: number, managerNote: string | null) {
+  db.prepare(
+    `UPDATE applications SET status = 'rejected', manager_note = ?, notified = 0, updated_at = ? WHERE id = ?`,
+  ).run(managerNote, new Date().toISOString(), id);
+  return getApplication(id)!;
+}
+
+/** Move a candidate into the trial period. Interview details are kept for the record. */
+export function startTrial(id: number, trialStartAt: string, managerNote: string | null) {
+  db.prepare(
+    `UPDATE applications SET status = 'trial', trial_start_at = ?, manager_note = ?, notified = 0, updated_at = ? WHERE id = ?`,
+  ).run(trialStartAt, managerNote, new Date().toISOString(), id);
+  return getApplication(id)!;
+}
+
+/** Record the applicant's answer to the interview invitation. */
+export function setInterviewResponse(id: number, response: InterviewResponse, note: string | null) {
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE applications SET interview_response = ?, response_note = ?, responded_at = ?, updated_at = ? WHERE id = ?`,
+  ).run(response, note, now, now, id);
+  return getApplication(id)!;
+}
+
+/** Applications where the candidate asked for another interview time. */
+export function countRescheduleRequests() {
+  const r = db
+    .prepare(`SELECT COUNT(*) AS n FROM applications WHERE status = 'interview' AND interview_response = 'reschedule'`)
+    .get() as Row;
+  return Number(r.n);
 }
 
 export function setNotified(id: number, ok: boolean) {

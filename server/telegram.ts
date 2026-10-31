@@ -3,7 +3,8 @@ import { Bot, InlineKeyboard } from "grammy";
 import { config } from "./config";
 import { BRANCH_ADDRESS, BRANCH_NAME } from "../src/shared/hiring";
 import { formatInterview } from "../src/shared/format";
-import type { Application } from "../src/shared/types";
+import type { Application, InterviewResponse } from "../src/shared/types";
+import * as db from "./db";
 
 export interface TgUser {
   id: number;
@@ -54,6 +55,52 @@ bot.command("start", (ctx) =>
   ),
 );
 
+/* Interview reply buttons. callback_data = "iv:ok:<id>:<yyyymmddhhmm>" — the time stamp makes
+   buttons on an old invitation stop working once the manager picks a new time. */
+const stamp = (local: string | null) => (local ?? "").replace(/\D/g, "");
+
+bot.callbackQuery(/^iv:ok:(\d+):(\d*)$/, async (ctx) => {
+  const [, id, ts] = ctx.match;
+  const a = db.getApplication(Number(id));
+  if (!a || a.tgId !== ctx.from.id) return ctx.answerCallbackQuery({ text: "Ariza topilmadi." });
+  if (a.status !== "interview" || stamp(a.interviewAt) !== ts)
+    return ctx.answerCallbackQuery({ text: "Bu taklif eskirgan — ilovada hozirgi holatni ko‘ring.", show_alert: true });
+
+  await recordResponse(a, "confirmed", null);
+  await ctx.answerCallbackQuery({ text: "Rahmat! Sizni kutamiz ☕️" });
+  await ctx
+    .editMessageReplyMarkup({ reply_markup: responseKeyboard(a, true) })
+    .catch(() => {}); // message too old to edit — not important
+  await ctx.reply("✅ Kelishingizni tasdiqladingiz. Vaqt o‘zgarsa, ilovadan boshqa vaqt so‘rashingiz mumkin.");
+});
+
+function responseKeyboard(a: Application, confirmed = false) {
+  const kb = new InlineKeyboard();
+  if (!confirmed) kb.text("✅ Kelaman", `iv:ok:${a.id}:${stamp(a.interviewAt)}`).row();
+  return kb.webApp("🕒 Boshqa vaqt so‘rash", `${config.publicUrl}/?reschedule=1`);
+}
+
+/** Save the applicant's answer and let the managers know. */
+export async function recordResponse(a: Application, response: InterviewResponse, note: string | null) {
+  const updated = db.setInterviewResponse(a.id, response, note);
+  if (!config.managerChatId) return updated;
+  const text =
+    response === "confirmed"
+      ? `✅ <b>${esc(a.fullName)}</b> suhbatga kelishini tasdiqladi` +
+        (a.interviewAt ? ` (${esc(formatInterview(a.interviewAt))})` : "")
+      : `🕒 <b>${esc(a.fullName)}</b> suhbat vaqtini o‘zgartirishni so‘radi` +
+        (note ? `:\n“${esc(note)}”` : "");
+  try {
+    await bot.api.sendMessage(config.managerChatId, text, {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard().url("Arizani ochish", `${config.publicUrl}/admin#${a.id}`),
+    });
+  } catch (e) {
+    console.error("Could not notify manager chat:", (e as Error).message);
+  }
+  return updated;
+}
+
 bot.on("message", (ctx) =>
   ctx.reply("Ariza topshirish yoki holatini ko‘rish uchun tugmani bosing.", {
     reply_markup: appButton("Ilovani ochish"),
@@ -82,7 +129,21 @@ export async function notifyApplicant(a: Application): Promise<boolean> {
       (a.interviewAt ? `🗓 <b>Vaqt:</b> ${esc(formatInterview(a.interviewAt))}\n` : "") +
       `📍 <b>Manzil:</b> ${esc(a.interviewPlace || `${BRANCH_NAME}, ${BRANCH_ADDRESS}`)}\n` +
       (a.managerNote ? `\n${esc(a.managerNote)}\n` : "") +
-      `\nKela olmasangiz, iltimos, shu yerga oldindan yozib qo‘ying.`;
+      `\nKela olasizmi? Quyidagi tugma orqali javob bering.`;
+  } else if (a.status === "trial") {
+    text =
+      `Tabriklaymiz, ${first}! 🎉☕️\n\n` +
+      `Suhbatdan muvaffaqiyatli o‘tdingiz — sizni <b>30 kunlik sinov muddatiga</b> qabul qilamiz.\n\n` +
+      (a.trialStartAt ? `🗓 <b>Birinchi ish kuni:</b> ${esc(formatInterview(a.trialStartAt))}\n` : "") +
+      `📍 <b>Filial:</b> ${esc(`${BRANCH_NAME}, ${BRANCH_ADDRESS}`)}\n` +
+      (a.managerNote ? `\n${esc(a.managerNote)}\n` : "") +
+      `\nSinov muddatida ham oylik to‘lanadi. Ishni yaxshi o‘rgansangiz, doimiy ishga olinasiz. Omad!`;
+  } else if (a.status === "rejected" && a.trialStartAt) {
+    text =
+      `Assalomu alaykum, ${first}.\n\n` +
+      `Sinov muddatida ishlaganingiz uchun rahmat. Afsuski, natijalarga ko‘ra hamkorlikni davom ettira olmaymiz.` +
+      (a.managerNote ? `\n\n${esc(a.managerNote)}` : "") +
+      `\n\nIshlagan kunlaringiz uchun oylik kelishilganidek to‘lanadi. Omad!`;
   } else if (a.status === "rejected") {
     text =
       `Assalomu alaykum, ${first}.\n\n` +
@@ -92,7 +153,10 @@ export async function notifyApplicant(a: Application): Promise<boolean> {
   } else return false;
 
   try {
-    await bot.api.sendMessage(a.tgId, text, { parse_mode: "HTML" });
+    await bot.api.sendMessage(a.tgId, text, {
+      parse_mode: "HTML",
+      reply_markup: a.status === "interview" ? responseKeyboard(a) : undefined,
+    });
     return true;
   } catch (e) {
     console.error(`Could not message applicant #${a.id}:`, (e as Error).message);

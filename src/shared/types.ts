@@ -1,8 +1,13 @@
-export type Status = "new" | "interview" | "rejected";
+export type Status = "new" | "interview" | "trial" | "rejected";
+export const STATUSES: Status[] = ["new", "interview", "trial", "rejected"];
+
+/** Applicant's answer to an interview invitation. */
+export type InterviewResponse = "confirmed" | "reschedule";
 
 export const STATUS_LABEL: Record<Status, string> = {
   new: "Yangi",
   interview: "Suhbatga taklif qilingan",
+  trial: "Sinov muddatida",
   rejected: "Rad etilgan",
 };
 
@@ -23,9 +28,13 @@ export interface Application extends ApplicationInput {
   status: Status;
   interviewAt: string | null; // "2026-11-03T10:00" local Tashkent time
   interviewPlace: string | null;
+  trialStartAt: string | null; // first trial work day, "2026-11-10T05:00" Tashkent time
   managerNote: string | null; // shown to the applicant in the bot message
   internalNote: string | null; // manager-only
   notified: boolean; // bot message delivered
+  interviewResponse: InterviewResponse | null; // null = no answer yet
+  responseNote: string | null; // preferred time when asking to reschedule
+  respondedAt: string | null; // ISO
   createdAt: string; // ISO
   updatedAt: string; // ISO
 }
@@ -33,7 +42,7 @@ export interface Application extends ApplicationInput {
 /** Applicant's own view — no internal notes. */
 export type MyApplication = Omit<Application, "internalNote" | "tgId">;
 
-export const LIMITS = { text: 600, name: 80, phone: 20, minAge: 18, maxAge: 70 };
+export const LIMITS = { responseNote: 300, text: 600, name: 80, phone: 20, minAge: 18, maxAge: 70 };
 
 export function validateInput(d: Partial<Record<keyof ApplicationInput, unknown>>) {
   const errors: Partial<Record<keyof ApplicationInput, string>> = {};

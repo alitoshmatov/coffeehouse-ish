@@ -3,9 +3,9 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { config } from "./config";
 import * as db from "./db";
-import { notifyApplicant, notifyManager, startBot, verifyInitData, type TgUser } from "./telegram";
+import { notifyApplicant, notifyManager, recordResponse, startBot, verifyInitData, type TgUser } from "./telegram";
 import { checkPassword, clearSession, isAdmin, issueSession, loginLimiter, requireAdmin } from "./auth";
-import { validateInput, type Application, type MyApplication, type Status } from "../src/shared/types";
+import { LIMITS, STATUSES, validateInput, type Application, type MyApplication, type Status } from "../src/shared/types";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -45,6 +45,23 @@ app.post("/api/apply", requireTelegram, async (req: TgReq, res) => {
   res.status(201).json({ application: forApplicant(created) });
 });
 
+/** Applicant confirms the interview or asks for another time. */
+app.post("/api/interview/respond", requireTelegram, async (req: TgReq, res) => {
+  const latest = db.latestForUser(req.tgUser!.id);
+  if (!latest || latest.status !== "interview")
+    return res.status(409).json({ error: "Sizda faol suhbat taklifi yo‘q." });
+
+  const { response, note } = req.body ?? {};
+  const text = typeof note === "string" ? note.trim().slice(0, LIMITS.responseNote) : "";
+  if (response === "reschedule" && text.length < 3)
+    return res.status(400).json({ error: "Qaysi kun va vaqt qulayligini yozing." });
+  if (response !== "confirmed" && response !== "reschedule")
+    return res.status(400).json({ error: "Noto‘g‘ri javob." });
+
+  const updated = await recordResponse(latest, response, response === "reschedule" ? text : null);
+  res.json({ application: forApplicant(updated) });
+});
+
 /* ───────────────────────────────── Manager panel ───────────────────────────────── */
 
 app.post("/api/admin/login", loginLimiter, (req, res) => {
@@ -62,8 +79,13 @@ app.get("/api/admin/session", (req, res) => res.json({ ok: isAdmin(req) }));
 
 app.get("/api/admin/applications", requireAdmin, (req, res) => {
   const s = req.query.status as Status | undefined;
-  const status = s && ["new", "interview", "rejected"].includes(s) ? s : undefined;
-  res.json({ applications: db.listApplications(status), counts: db.countByStatus(), hiringOpen: db.isHiringOpen() });
+  const status = s && STATUSES.includes(s) ? s : undefined;
+  res.json({
+    applications: db.listApplications(status),
+    counts: db.countByStatus(),
+    rescheduleRequests: db.countRescheduleRequests(),
+    hiringOpen: db.isHiringOpen(),
+  });
 });
 
 const LOCAL_DT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
@@ -81,8 +103,15 @@ app.post("/api/admin/applications/:id/decision", requireAdmin, async (req, res) 
       return res.status(400).json({ error: "Suhbat sanasi va vaqtini tanlang." });
     const place = typeof interviewPlace === "string" ? interviewPlace.trim().slice(0, 200) : "";
     db.updateDecision(id, { status, interviewAt, interviewPlace: place || null, managerNote: note || null });
+  } else if (status === "trial") {
+    if (current.status !== "interview" && current.status !== "trial")
+      return res.status(400).json({ error: "Sinov muddatiga faqat suhbatdan keyin qabul qilinadi." });
+    const { trialStartAt } = req.body ?? {};
+    if (typeof trialStartAt !== "string" || !LOCAL_DT.test(trialStartAt))
+      return res.status(400).json({ error: "Birinchi ish kuni va vaqtini tanlang." });
+    db.startTrial(id, trialStartAt, note || null);
   } else if (status === "rejected") {
-    db.updateDecision(id, { status, managerNote: note || null });
+    db.reject(id, note || null);
   } else if (status === "new") {
     db.updateDecision(id, { status }); // undo — no message is sent
     return res.json({ application: db.getApplication(id), delivered: null });

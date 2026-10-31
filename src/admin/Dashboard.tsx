@@ -7,11 +7,12 @@ import { StatusBadge } from "@/ui/StatusBadge";
 import { Detail } from "./Detail";
 
 type Tab = Status | "all";
-type ListRes = { applications: Application[]; counts: Record<Status, number>; hiringOpen: boolean };
+type ListRes = { applications: Application[]; counts: Record<Status, number>; rescheduleRequests: number; hiringOpen: boolean };
 const TABS: { key: Tab; label: string }[] = [
   { key: "new", label: "Yangi" },
   { key: "interview", label: "Suhbat" },
-  { key: "rejected", label: "Rad etilgan" },
+  { key: "trial", label: "Sinov" },
+  { key: "rejected", label: "Rad" },
   { key: "all", label: "Hammasi" },
 ];
 
@@ -111,11 +112,17 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                 role="tab"
                 aria-selected={tab === t.key}
                 onClick={() => setTab(t.key)}
-                className={`flex-1 whitespace-nowrap rounded-full px-3 py-2 text-sm font-medium transition-colors ${
+                className={`flex-1 whitespace-nowrap rounded-full px-2.5 py-2 text-sm font-medium transition-colors ${
                   tab === t.key ? "bg-ember text-foam" : "text-bean/70 hover:bg-foam/60"
                 }`}
               >
                 {t.label} <span className="tabular-nums opacity-70">{count(t.key)}</span>
+                {t.key === "interview" && !!data?.rescheduleRequests && (
+                  <span
+                    className="ml-1 inline-block h-2 w-2 rounded-full bg-amber-500 align-middle"
+                    title={`${data.rescheduleRequests} ta nomzod boshqa vaqt so‘radi`}
+                  />
+                )}
               </button>
             ))}
           </div>
@@ -163,6 +170,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                       <span className="block truncate text-sm text-bean/60">
                         {a.age} yosh · {a.phone}
                       </span>
+                      {a.status === "interview" && <ReplyTag app={a} />}
                     </span>
                     <span className="shrink-0 text-xs text-bean/50">{formatStamp(a.createdAt)}</span>
                   </button>
@@ -182,4 +190,13 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
       </div>
     </div>
   );
+}
+
+/** Candidate's answer to the invitation, shown in the list. */
+function ReplyTag({ app }: { app: Application }) {
+  if (app.interviewResponse === "confirmed")
+    return <span className="mt-1 inline-block text-xs font-medium text-emerald-700">✓ Keladi</span>;
+  if (app.interviewResponse === "reschedule")
+    return <span className="mt-1 inline-block text-xs font-semibold text-amber-700">🕒 Boshqa vaqt so‘radi</span>;
+  return <span className="mt-1 inline-block text-xs text-bean/45">Javob kutilmoqda</span>;
 }
