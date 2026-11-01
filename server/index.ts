@@ -26,7 +26,8 @@ import {
   verifyPassword,
   type AdminReq,
 } from "./auth";
-import { DEFAULT_CONTENT, validateContent } from "../src/shared/hiring";
+import { branchLine, DEFAULT_CONTENT, validateContent } from "../src/shared/hiring";
+import { interviewMessage, MESSAGE_LIMIT, rejectMessage, trialMessage } from "../src/shared/messages";
 import { jobContentPdf } from "./pdf";
 import { LIMITS, validateInput, type Application, type MyApplication, type PublicRound, type Round } from "../src/shared/types";
 
@@ -181,23 +182,26 @@ app.post("/api/admin/applications/:id/decision", requireAdmin, async (req: Admin
   const current = db.getApplication(id);
   if (!current) return res.status(404).json({ error: "Ariza topilmadi." });
 
-  const { status, interviewAt, interviewPlace, managerNote } = req.body ?? {};
-  const note = typeof managerNote === "string" ? managerNote.trim().slice(0, 500) : "";
+  const { status, interviewAt, interviewPlace } = req.body ?? {};
+  // The text the admin saw (and maybe edited) in "Nomzod ko‘radigan xabar". Empty → standard text.
+  const custom = typeof req.body?.message === "string" ? req.body.message.trim().slice(0, MESSAGE_LIMIT) : "";
+  const branch = branchLine((db.getRound(current.roundId) ?? { content: DEFAULT_CONTENT }).content);
 
   if (status === "interview") {
     if (typeof interviewAt !== "string" || !LOCAL_DT.test(interviewAt))
       return res.status(400).json({ error: "Suhbat sanasi va vaqtini tanlang." });
     const place = typeof interviewPlace === "string" ? interviewPlace.trim().slice(0, 200) : "";
-    db.updateDecision(id, { status, interviewAt, interviewPlace: place || null, managerNote: note || null }, by);
+    const sentMessage = custom || interviewMessage({ fullName: current.fullName, interviewAt, place: place || branch });
+    db.updateDecision(id, { status, interviewAt, interviewPlace: place || null, sentMessage }, by);
   } else if (status === "trial") {
     if (current.status !== "interview" && current.status !== "trial")
       return res.status(400).json({ error: "Sinov muddatiga faqat suhbatdan keyin qabul qilinadi." });
     const { trialStartAt } = req.body ?? {};
     if (typeof trialStartAt !== "string" || !LOCAL_DT.test(trialStartAt))
       return res.status(400).json({ error: "Birinchi ish kuni va vaqtini tanlang." });
-    db.startTrial(id, trialStartAt, note || null, by);
+    db.startTrial(id, trialStartAt, custom || trialMessage({ fullName: current.fullName, trialStartAt, branch }), by);
   } else if (status === "rejected") {
-    db.reject(id, note || null, by);
+    db.reject(id, custom || rejectMessage({ fullName: current.fullName, duringTrial: current.status === "trial" }), by);
   } else if (status === "new") {
     db.updateDecision(id, { status }, by); // undo — no message is sent
     return res.json({ application: db.getApplication(id), delivered: null });

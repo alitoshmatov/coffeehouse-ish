@@ -4,6 +4,7 @@ import { Bot, InlineKeyboard } from "grammy";
 import { config } from "./config";
 import { branchLine } from "../src/shared/hiring";
 import { formatInterview } from "../src/shared/format";
+import { interviewMessage, rejectMessage, trialMessage } from "../src/shared/messages";
 import type { Application, InterviewResponse, Round } from "../src/shared/types";
 import * as db from "./db";
 
@@ -195,41 +196,20 @@ export async function startBot() {
 
 /** Message sent to the applicant when the manager decides. Returns true if delivered. */
 export async function notifyApplicant(a: Application): Promise<boolean> {
-  const first = esc(a.fullName.split(/\s+/)[0]);
-  let text: string;
-  if (a.status === "interview") {
-    text =
-      `Assalomu alaykum, ${first}! 🎉\n\n` +
-      `Arizangiz ko‘rib chiqildi — sizni <b>suhbatga</b> taklif qilamiz.\n\n` +
-      (a.interviewAt ? `🗓 <b>Vaqt:</b> ${esc(formatInterview(a.interviewAt))}\n` : "") +
-      `📍 <b>Manzil:</b> ${esc(a.interviewPlace || branchOf(a))}\n` +
-      (a.managerNote ? `\n${esc(a.managerNote)}\n` : "") +
-      `\nKela olasizmi? Quyidagi tugma orqali javob bering.`;
-  } else if (a.status === "trial") {
-    text =
-      `Tabriklaymiz, ${first}! 🎉☕️\n\n` +
-      `Suhbatdan muvaffaqiyatli o‘tdingiz — sizni <b>30 kunlik sinov muddatiga</b> qabul qilamiz.\n\n` +
-      (a.trialStartAt ? `🗓 <b>Birinchi ish kuni:</b> ${esc(formatInterview(a.trialStartAt))}\n` : "") +
-      `📍 <b>Filial:</b> ${esc(branchOf(a))}\n` +
-      (a.managerNote ? `\n${esc(a.managerNote)}\n` : "") +
-      `\nSinov muddatida ham oylik to‘lanadi. Ishni yaxshi o‘rgansangiz, doimiy ishga olinasiz. Omad!`;
-  } else if (a.status === "rejected" && a.trialStartAt) {
-    text =
-      `Assalomu alaykum, ${first}.\n\n` +
-      `Sinov muddatida ishlaganingiz uchun rahmat. Afsuski, natijalarga ko‘ra hamkorlikni davom ettira olmaymiz.` +
-      (a.managerNote ? `\n\n${esc(a.managerNote)}` : "") +
-      `\n\nIshlagan kunlaringiz uchun oylik kelishilganidek to‘lanadi. Omad!`;
-  } else if (a.status === "rejected") {
-    text =
-      `Assalomu alaykum, ${first}.\n\n` +
-      `Coffee House’ga qiziqish bildirganingiz uchun rahmat. Afsuski, bu safar boshqa nomzodni tanladik.` +
-      (a.managerNote ? `\n\n${esc(a.managerNote)}` : "") +
-      `\n\nYangi o‘rin ochilganda shu bot orqali yana ariza topshirishingiz mumkin. Omad!`;
-  } else return false;
+  if (a.status === "new") return false;
+  // Normally the exact text the admin approved; older decisions (before editable messages) are rebuilt.
+  const branch = branchOf(a);
+  let text =
+    a.sentMessage ??
+    (a.status === "interview"
+      ? interviewMessage({ fullName: a.fullName, interviewAt: a.interviewAt ?? "", place: a.interviewPlace || branch })
+      : a.status === "trial"
+        ? trialMessage({ fullName: a.fullName, trialStartAt: a.trialStartAt ?? "", branch })
+        : rejectMessage({ fullName: a.fullName, duringTrial: !!a.trialStartAt }));
+  if (!a.sentMessage && a.managerNote) text += `\n\n${a.managerNote}`;
 
   try {
     await bot.api.sendMessage(a.tgId, text, {
-      parse_mode: "HTML",
       reply_markup: a.status === "interview" ? responseKeyboard(a) : undefined,
     });
     return true;

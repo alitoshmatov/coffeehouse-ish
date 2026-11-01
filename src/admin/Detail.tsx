@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AlertTriangle, ArrowLeft, BadgeCheck, CalendarCheck, CheckCircle2, Loader2, Phone, RotateCcw, Send, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { formatInterview, formatStamp } from "@/shared/format";
+import { interviewMessage, MESSAGE_LIMIT, rejectMessage, trialMessage } from "@/shared/messages";
 import type { Application, Status } from "@/shared/types";
 import { StatusBadge } from "@/ui/StatusBadge";
 
@@ -37,26 +38,55 @@ export function Detail({
   const [place, setPlace] = useState(a.interviewPlace ?? "");
   const [trialDate, setTrialDate] = useState(a.trialStartAt?.slice(0, 10) ?? tomorrow());
   const [trialTime, setTrialTime] = useState(a.trialStartAt?.slice(11, 16) ?? "05:00");
-  const [message, setMessage] = useState("");
+  // Edited text of "Nomzod ko‘radigan xabar"; null = follow the standard text (updates with date/place)
+  const [custom, setCustom] = useState<string | null>(null);
+  const [editedFrom, setEditedFrom] = useState<string | null>(null); // standard text at the moment of the first edit
   const [note, setNote] = useState(a.internalNote ?? "");
   const [noteSaved, setNoteSaved] = useState(true);
 
+  const template =
+    mode === "interview"
+      ? interviewMessage({ fullName: a.fullName, interviewAt: `${date}T${time}`, place: place.trim() || DEFAULT_PLACE })
+      : mode === "trial"
+        ? trialMessage({ fullName: a.fullName, trialStartAt: `${trialDate}T${trialTime}`, branch: DEFAULT_PLACE })
+        : rejectMessage({ fullName: a.fullName, duringTrial: a.status === "trial" });
+  const message = custom ?? template;
+  const edited = custom !== null && custom !== template;
+  const stale = edited && editedFrom !== null && editedFrom !== template; // date/place changed after editing
+  const editMessage = (v: string) => {
+    if (custom === null) setEditedFrom(template);
+    setCustom(v);
+  };
+  const resetMessage = () => {
+    setCustom(null);
+    setEditedFrom(null);
+  };
+  const openForm = (m: Mode) => {
+    resetMessage();
+    setError("");
+    setMode(m);
+  };
+
   async function decide(status: Status) {
+    if (status !== "new" && !message.trim()) {
+      setError("Xabar matni bo‘sh bo‘lmasin.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       const body =
         status === "interview"
-          ? { status, interviewAt: `${date}T${time}`, interviewPlace: place, managerNote: message }
+          ? { status, interviewAt: `${date}T${time}`, interviewPlace: place, message }
           : status === "trial"
-            ? { status, trialStartAt: `${trialDate}T${trialTime}`, managerNote: message }
+            ? { status, trialStartAt: `${trialDate}T${trialTime}`, message }
             : status === "rejected"
-              ? { status, managerNote: message }
+              ? { status, message }
               : { status };
       const r = await api<DecisionRes>(`/api/admin/applications/${a.id}/decision`, { body });
       onChange(r.application);
       setMode("idle");
-      setMessage("");
+      resetMessage();
       setFlash(
         r.delivered === null
           ? { ok: true, text: "Ariza “Yangi” holatiga qaytarildi." }
@@ -151,7 +181,12 @@ export function Detail({
             </p>
           )}
           {a.status === "interview" && <p className="text-bean/70">{a.interviewPlace || DEFAULT_PLACE}</p>}
-          {a.managerNote && <p className="mt-1 text-bean/70">Xabar: “{a.managerNote}”</p>}
+          {(a.sentMessage || a.managerNote) && (
+            <details className="mt-2 group">
+              <summary className="cursor-pointer select-none text-bean/65 hover:text-bean">Yuborilgan xabarni ko‘rish</summary>
+              <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-white p-3 text-bean/80 leading-relaxed">{a.sentMessage ?? a.managerNote}</p>
+            </details>
+          )}
           {a.status === "interview" && (
             <p
               className={`mt-2 rounded-lg px-3 py-2 font-medium ${
@@ -213,27 +248,27 @@ export function Detail({
           <div className="flex flex-wrap gap-2">
             {(a.status === "interview" || a.status === "trial") && (
               <button
-                onClick={() => setMode("trial")}
+                onClick={() => openForm("trial")}
                 className={`${a.status === "interview" && a.interviewResponse !== "reschedule" ? "btn-primary" : "btn-ghost"} flex-auto whitespace-nowrap`}
               >
                 <BadgeCheck className="w-4 h-4" aria-hidden /> {a.status === "trial" ? "Boshlanish sanasini o‘zgartirish" : "Sinov muddatiga qabul qilish"}
               </button>
             )}
             {(a.status === "new" || a.status === "rejected") && (
-              <button onClick={() => setMode("interview")} className="btn-primary flex-auto whitespace-nowrap">
+              <button onClick={() => openForm("interview")} className="btn-primary flex-auto whitespace-nowrap">
                 <CalendarCheck className="w-4 h-4" aria-hidden /> Suhbatga taklif qilish
               </button>
             )}
             {a.status === "interview" && (
               <button
-                onClick={() => setMode("interview")}
+                onClick={() => openForm("interview")}
                 className={`${a.interviewResponse === "reschedule" ? "btn-primary" : "btn-ghost"} flex-auto whitespace-nowrap`}
               >
                 <CalendarCheck className="w-4 h-4" aria-hidden /> {a.interviewResponse === "reschedule" ? "Yangi vaqt belgilash" : "Vaqtni o‘zgartirish"}
               </button>
             )}
             {a.status !== "rejected" && (
-              <button onClick={() => setMode("reject")} className="btn-ghost flex-auto whitespace-nowrap text-red-700">
+              <button onClick={() => openForm("reject")} className="btn-ghost flex-auto whitespace-nowrap text-red-700">
                 <X className="w-4 h-4" aria-hidden /> Rad etish
               </button>
             )}
@@ -275,21 +310,13 @@ export function Detail({
                 </span>
               <input value={place} onChange={(e) => setPlace(e.target.value)} placeholder={DEFAULT_PLACE} maxLength={200} className="field py-2.5" />
             </label>
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium">
-                Qo‘shimcha xabar <span className="font-normal text-bean/50">(ixtiyoriy)</span>
+            <MessageBox value={message} edited={edited} stale={stale} onChange={editMessage} onReset={resetMessage}>
+              <span className="flex flex-wrap gap-1.5 text-xs">
+                Xabar ostida tugmalar:
+                <span className="rounded-md border border-line bg-white px-2 py-0.5">✅ Kelaman</span>
+                <span className="rounded-md border border-line bg-white px-2 py-0.5">🕒 Boshqa vaqt so‘rash</span>
               </span>
-              <textarea rows={2} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Masalan: pasportingizni olib keling" className="field resize-none py-2.5" />
-            </label>
-            <Preview>
-              Assalomu alaykum, {first}! 🎉 Arizangiz ko‘rib chiqildi — sizni suhbatga taklif qilamiz.{" "}
-              <b>Vaqt:</b> {date && time ? formatInterview(`${date}T${time}`) : "—"}. <b>Manzil:</b> {place || DEFAULT_PLACE}.
-              {message && ` ${message}`}
-              <span className="mt-2 flex gap-2 text-xs">
-                <span className="rounded-md border border-line px-2 py-1">✅ Kelaman</span>
-                <span className="rounded-md border border-line px-2 py-1">🕒 Boshqa vaqt so‘rash</span>
-              </span>
-            </Preview>
+            </MessageBox>
             <Actions busy={busy} error={error} onCancel={() => setMode("idle")} label="Taklif yuborish" />
           </form>
         )}
@@ -313,17 +340,7 @@ export function Detail({
                 <input type="time" required step={900} value={trialTime} onChange={(e) => setTrialTime(e.target.value)} className="field py-2.5" />
               </label>
             </div>
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium">
-                Qo‘shimcha xabar <span className="font-normal text-bean/50">(ixtiyoriy)</span>
-              </span>
-              <textarea rows={2} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Masalan: qora shim va qulay oyoq kiyimda keling" className="field resize-none py-2.5" />
-            </label>
-            <Preview>
-              Tabriklaymiz, {first}! 🎉 Suhbatdan muvaffaqiyatli o‘tdingiz — sizni 30 kunlik sinov muddatiga qabul qilamiz.{" "}
-              <b>Birinchi ish kuni:</b> {trialDate && trialTime ? formatInterview(`${trialDate}T${trialTime}`) : "—"}.{" "}
-              <b>Filial:</b> {DEFAULT_PLACE}.{message && ` ${message}`} Sinov muddatida ham oylik to‘lanadi.
-            </Preview>
+            <MessageBox value={message} edited={edited} stale={stale} onChange={editMessage} onReset={resetMessage} />
             <Actions busy={busy} error={error} onCancel={() => setMode("idle")} label="Qabul qilish va xabar yuborish" />
           </form>
         )}
@@ -337,25 +354,7 @@ export function Detail({
             className="space-y-3"
           >
             <h3 className="font-semibold">{a.status === "trial" ? "Sinov muddatini to‘xtatish" : "Arizani rad etish"}</h3>
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium">
-                Nomzodga izoh <span className="font-normal text-bean/50">(ixtiyoriy, nomzod ko‘radi)</span>
-              </span>
-              <textarea rows={2} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)} className="field resize-none py-2.5" />
-            </label>
-            <Preview>
-              {a.status === "trial" ? (
-                <>
-                  Assalomu alaykum, {first}. Sinov muddatida ishlaganingiz uchun rahmat. Afsuski, natijalarga ko‘ra hamkorlikni davom ettira olmaymiz.
-                  {message && ` ${message}`} Ishlagan kunlaringiz uchun oylik kelishilganidek to‘lanadi. Omad!
-                </>
-              ) : (
-                <>
-                  Assalomu alaykum, {first}. Coffee House’ga qiziqish bildirganingiz uchun rahmat. Afsuski, bu safar boshqa nomzodni tanladik.
-                  {message && ` ${message}`} Yangi o‘rin ochilganda yana ariza topshirishingiz mumkin. Omad!
-                </>
-              )}
-            </Preview>
+            <MessageBox value={message} edited={edited} stale={stale} onChange={editMessage} onReset={resetMessage} />
             <Actions busy={busy} error={error} onCancel={() => setMode("idle")} label="Rad etish va xabar yuborish" danger />
           </form>
         )}
@@ -375,11 +374,56 @@ function Answer({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Preview({ children }: { children: React.ReactNode }) {
+/** Editable text of the bot message the candidate will receive. */
+function MessageBox({
+  value,
+  edited,
+  stale,
+  onChange,
+  onReset,
+  children,
+}: {
+  value: string;
+  edited: boolean;
+  stale?: boolean;
+  onChange: (v: string) => void;
+  onReset: () => void;
+  children?: React.ReactNode;
+}) {
   return (
-    <div className="rounded-xl border border-line bg-white p-3 text-sm text-bean/80 leading-relaxed">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wider text-bean/45">Nomzod ko‘radigan xabar</p>
-      {children}
+    <div className="rounded-xl border border-line bg-white p-3">
+      <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
+        <label htmlFor="candidate-message" className="text-xs font-medium uppercase tracking-wider text-bean/55">
+          Nomzod ko‘radigan xabar
+        </label>
+        {edited ? (
+          <button type="button" onClick={onReset} className="text-xs font-medium text-ember underline underline-offset-2">
+            Standart matnga qaytarish
+          </button>
+        ) : (
+          <span className="text-xs text-bean/45">Tahrirlash mumkin</span>
+        )}
+      </div>
+      <textarea
+        id="candidate-message"
+        rows={Math.min(14, Math.max(6, value.split("\n").length + 1))}
+        maxLength={MESSAGE_LIMIT}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="field resize-y py-2.5 text-sm leading-relaxed"
+      />
+      {stale && (
+        <p className="mt-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900" role="status">
+          Sana, vaqt yoki manzilni o‘zgartirdingiz — tahrirlangan matnda ular avtomatik yangilanmaydi. Matnni tekshiring yoki
+          standart matnga qayting.
+        </p>
+      )}
+      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 text-xs text-bean/50">
+        <span>{children ?? (edited ? "O‘zgartirilgan matn yuboriladi." : "Sana va manzilni o‘zgartirsangiz, matn ham yangilanadi.")}</span>
+        <span className="tabular-nums">
+          {value.length}/{MESSAGE_LIMIT}
+        </span>
+      </div>
     </div>
   );
 }

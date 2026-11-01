@@ -96,6 +96,7 @@ for (const [name, type] of [
   ["trial_start_at", "TEXT"],
   ["decided_by", "TEXT"],
   ["round_id", "INTEGER"],
+  ["sent_message", "TEXT"],
 ] as const) {
   if (!columns.has(name)) db.exec(`ALTER TABLE applications ADD COLUMN ${name} ${type}`);
 }
@@ -117,6 +118,7 @@ const toApp = (r: Row): Application => ({
   interviewPlace: (r.interview_place as string) ?? null,
   trialStartAt: (r.trial_start_at as string) ?? null,
   managerNote: (r.manager_note as string) ?? null,
+  sentMessage: (r.sent_message as string) ?? null,
   internalNote: (r.internal_note as string) ?? null,
   decidedBy: (r.decided_by as string) ?? null,
   notified: Number(r.notified) === 1,
@@ -166,30 +168,39 @@ export function countByStatus(roundId: number) {
 
 export function updateDecision(
   id: number,
-  d: { status: Status; interviewAt?: string | null; interviewPlace?: string | null; managerNote?: string | null },
+  d: { status: Status; interviewAt?: string | null; interviewPlace?: string | null; managerNote?: string | null; sentMessage?: string | null },
   decidedBy: string | null = null,
 ) {
   db.prepare(
-    `UPDATE applications SET status = ?, interview_at = ?, interview_place = ?, manager_note = ?, notified = 0,
+    `UPDATE applications SET status = ?, interview_at = ?, interview_place = ?, manager_note = ?, sent_message = ?, notified = 0,
        interview_response = NULL, response_note = NULL, responded_at = NULL, trial_start_at = NULL, decided_by = ?,
        updated_at = ? WHERE id = ?`,
-  ).run(d.status, d.interviewAt ?? null, d.interviewPlace ?? null, d.managerNote ?? null, decidedBy, new Date().toISOString(), id);
+  ).run(
+    d.status,
+    d.interviewAt ?? null,
+    d.interviewPlace ?? null,
+    d.managerNote ?? null,
+    d.sentMessage ?? null,
+    decidedBy,
+    new Date().toISOString(),
+    id,
+  );
   return getApplication(id);
 }
 
 /** Reject, keeping interview/trial details so the message and history stay accurate. */
-export function reject(id: number, managerNote: string | null, decidedBy: string | null = null) {
+export function reject(id: number, sentMessage: string, decidedBy: string | null = null) {
   db.prepare(
-    `UPDATE applications SET status = 'rejected', manager_note = ?, notified = 0, decided_by = ?, updated_at = ? WHERE id = ?`,
-  ).run(managerNote, decidedBy, new Date().toISOString(), id);
+    `UPDATE applications SET status = 'rejected', manager_note = NULL, sent_message = ?, notified = 0, decided_by = ?, updated_at = ? WHERE id = ?`,
+  ).run(sentMessage, decidedBy, new Date().toISOString(), id);
   return getApplication(id)!;
 }
 
 /** Move a candidate into the trial period. Interview details are kept for the record. */
-export function startTrial(id: number, trialStartAt: string, managerNote: string | null, decidedBy: string | null = null) {
+export function startTrial(id: number, trialStartAt: string, sentMessage: string, decidedBy: string | null = null) {
   db.prepare(
-    `UPDATE applications SET status = 'trial', trial_start_at = ?, manager_note = ?, notified = 0, decided_by = ?, updated_at = ? WHERE id = ?`,
-  ).run(trialStartAt, managerNote, decidedBy, new Date().toISOString(), id);
+    `UPDATE applications SET status = 'trial', trial_start_at = ?, manager_note = NULL, sent_message = ?, notified = 0, decided_by = ?, updated_at = ? WHERE id = ?`,
+  ).run(trialStartAt, sentMessage, decidedBy, new Date().toISOString(), id);
   return getApplication(id)!;
 }
 

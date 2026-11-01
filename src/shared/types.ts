@@ -66,7 +66,8 @@ export interface Application extends ApplicationInput {
   interviewAt: string | null; // "2026-11-03T10:00" local Tashkent time
   interviewPlace: string | null;
   trialStartAt: string | null; // first trial work day, "2026-11-10T05:00" Tashkent time
-  managerNote: string | null; // shown to the applicant in the bot message
+  managerNote: string | null; // legacy: extra note added to the bot message (before messages were editable)
+  sentMessage: string | null; // exact text of the last decision message sent to the candidate
   internalNote: string | null; // manager-only
   decidedBy: string | null; // name of the admin who made the last decision
   notified: boolean; // bot message delivered
