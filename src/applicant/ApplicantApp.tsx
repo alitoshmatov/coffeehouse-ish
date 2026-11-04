@@ -7,8 +7,9 @@ import { DEFAULT_CONTENT } from "@/shared/hiring";
 import { JobIntro } from "./JobIntro";
 import { ApplyForm } from "./ApplyForm";
 import { StatusView } from "./StatusView";
+import { LearnView } from "./LearnView";
 
-type Screen = "pick" | "intro" | "form" | "status";
+type Screen = "pick" | "intro" | "form" | "status" | "learn";
 type Me = { rounds: PublicRound[]; application: MyApplication | null; applicationRound: PublicRound | null };
 
 // The bot's "Boshqa vaqt so‘rash" button opens the app with ?reschedule=1
@@ -44,7 +45,7 @@ export default function ApplicantApp() {
 
   // Telegram's native back button mirrors in-app navigation
   useEffect(() => {
-    if (!tg) return;
+    if (!tg || screen === "learn") return; // the recipe course drives the back button itself
     const back = () => go(screen === "form" ? "intro" : "pick");
     if (screen === "form" || (screen === "intro" && multiple)) {
       tg.BackButton.show();
@@ -57,6 +58,8 @@ export default function ApplicantApp() {
   if (error) return <Centered title="Ulanib bo‘lmadi" text={error} action={{ label: "Qayta urinish", onClick: load }} />;
   if (!me) return <Centered loading />;
 
+  if (screen === "learn" && me.application?.status === "trial") return <LearnView onExit={() => go("status")} />;
+
   if (screen === "status" && me.application)
     return (
       <StatusView
@@ -64,6 +67,7 @@ export default function ApplicantApp() {
         content={me.applicationRound?.content ?? DEFAULT_CONTENT}
         canReapply={me.rounds.length > 0 && me.application.status === "rejected"}
         onReapply={() => go(multiple ? "pick" : "intro")}
+        onLearn={() => go("learn")}
         onRefresh={load}
         onUpdate={(application) => setMe({ ...me, application })}
         startWithReschedule={startWithReschedule}

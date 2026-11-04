@@ -113,3 +113,46 @@ export function validateInput(d: Partial<Record<keyof ApplicationInput, unknown>
   };
   return { errors, value, ok: Object.keys(errors).length === 0 };
 }
+
+/* ───────────── Recipe book (served only to trial baristas, see GET /api/recipes) ───────────── */
+
+export interface RecipeLine {
+  name: string; // "Sut"
+  amount: string; // "280 ml" or "S · 0,25 l kraft stakan"
+  qty?: number; // numeric part, for practice questions
+  unit?: string;
+  base?: boolean; // cup, lid, sugar — the same on most drinks
+}
+
+export interface RecipeSize {
+  size: string; // "M", "0,5 l", "kichik"
+  cup: string;
+  lines: RecipeLine[];
+  steps: string[];
+}
+
+export interface RecipeItem {
+  id: string;
+  name: string;
+  tip?: string;
+  note?: string;
+  sizes: RecipeSize[];
+}
+
+export interface RecipeCategory {
+  id: string;
+  title: string;
+  note?: string;
+  items: RecipeItem[];
+}
+
+export interface RecipeRule {
+  title: string;
+  big: string;
+  text: string;
+}
+
+export interface RecipeBook {
+  rules: RecipeRule[];
+  categories: RecipeCategory[];
+}

@@ -29,6 +29,7 @@ import {
 import { branchLine, DEFAULT_CONTENT, validateContent } from "../src/shared/hiring";
 import { interviewMessage, MESSAGE_LIMIT, rejectMessage, trialMessage } from "../src/shared/messages";
 import { jobContentPdf } from "./pdf";
+import { RECIPE_BOOK } from "./recipes";
 import { LIMITS, validateInput, type Application, type MyApplication, type PublicRound, type Round } from "../src/shared/types";
 
 ensureOwner();
@@ -60,6 +61,13 @@ app.get("/api/me", requireTelegram, (req: TgReq, res) => {
     application: latest ? forApplicant(latest) : null,
     applicationRound: round ? publicRound(round) : null,
   });
+});
+
+// Menu recipes for learning — only for people currently on the trial period.
+app.get("/api/recipes", requireTelegram, (req: TgReq, res) => {
+  const latest = db.latestForUser(req.tgUser!.id);
+  if (latest?.status !== "trial") return res.status(403).json({ error: "Retseptlar sinov muddatidagi baristalar uchun ochiq." });
+  res.json(RECIPE_BOOK);
 });
 
 app.post("/api/apply", requireTelegram, async (req: TgReq, res) => {

@@ -25,7 +25,8 @@ export function trialMessage(o: { fullName: string; trialStartAt: string; branch
     `Suhbatdan muvaffaqiyatli o‘tdingiz — sizni 30 kunlik sinov muddatiga qabul qilamiz.\n\n` +
     `🗓 Birinchi ish kuni: ${formatInterview(o.trialStartAt)}\n` +
     `📍 Filial: ${o.branch}\n\n` +
-    `Sinov muddatida ham oylik to‘lanadi. Ishni yaxshi o‘rgansangiz, doimiy ishga olinasiz. Omad!`
+    `Sinov muddatida ham oylik to‘lanadi. Ishni yaxshi o‘rgansangiz, doimiy ishga olinasiz.\n\n` +
+    `📖 Menyu retseptlarini ilovada o‘rganishingiz mumkin: pastdagi «Ariza» tugmasini bosing. Omad!`
   );
 }
 

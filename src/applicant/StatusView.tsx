@@ -1,4 +1,4 @@
-import { CalendarDays, Check, Clock, MapPin, PartyPopper, RefreshCw, X } from "lucide-react";
+import { BookOpen, CalendarDays, Check, ChevronRight, Clock, MapPin, PartyPopper, RefreshCw, X } from "lucide-react";
 import { branchLine, type JobContent } from "@/shared/hiring";
 import { formatInterview, formatStamp } from "@/shared/format";
 import type { MyApplication } from "@/shared/types";
@@ -12,6 +12,7 @@ export function StatusView({
   content,
   canReapply,
   onReapply,
+  onLearn,
   onRefresh,
   onUpdate,
   startWithReschedule,
@@ -20,6 +21,7 @@ export function StatusView({
   content: JobContent;
   canReapply: boolean;
   onReapply: () => void;
+  onLearn?: () => void;
   onRefresh: () => void;
   onUpdate: (a: MyApplication) => void;
   startWithReschedule?: boolean;
@@ -106,6 +108,18 @@ export function StatusView({
           </p>
           {a.managerNote && <p className="border-t border-line pt-3 text-bean/80 leading-relaxed">{a.managerNote}</p>}
         </div>
+      )}
+      {a.status === "trial" && onLearn && (
+        <button onClick={onLearn} className="mt-4 w-full card p-4 flex items-center gap-3 text-left hover:border-ember/40 transition-colors">
+          <span className="w-11 h-11 shrink-0 rounded-full bg-foam text-ember flex items-center justify-center">
+            <BookOpen className="w-5 h-5" aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-semibold">Retseptlarni o‘rganish</span>
+            <span className="block text-sm text-bean/65">Menyudagi har bir ichimlik: tarkibi, tayyorlash qadamlari va mashq</span>
+          </span>
+          <ChevronRight className="w-5 h-5 shrink-0 text-bean/40" aria-hidden />
+        </button>
       )}
       {a.status === "interview" && (
         <InterviewReply application={a} startWithReschedule={startWithReschedule} onUpdate={onUpdate} />
