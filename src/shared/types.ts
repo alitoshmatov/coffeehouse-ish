@@ -136,7 +136,7 @@ export interface RecipeSize {
 /* Picture of a drink being built, step by step (drawn by src/applicant/CupScene.tsx) */
 export type CupKind = "s" | "m" | "l" | "c5" | "c7" | "cone" | "icup";
 export interface SceneLayer {
-  key: string; // colour key: kofe, sut, slivki, sirop, kakao, laimon, banan, qul, konst, asal, suv, choysuv, smes
+  key: string; // colour key: kofe, sut, slivki, sirop, kakao, laimon, banan, qul, konst, asal, suv, choysuv, smes, muz
   label: string; // "Sut"
   vol: number; // ml, only for drawing to scale
   amount: string; // "280 ml"

@@ -23,6 +23,7 @@ const COL: Record<string, string> = {
   suv: "#d3e3ea",
   choysuv: "#d39a52",
   smes: "#faf0dc",
+  muz: "#e1f2fc",
 };
 const INK = "#251B14";
 const KRAFT = "#c9a57a";
