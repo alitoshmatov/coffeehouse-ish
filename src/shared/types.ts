@@ -145,11 +145,13 @@ export type SceneOp =
   | { op: "cup" }
   | { op: "grind"; amount: string }
   | { op: "add"; to: "cup" | "pitcher" | "blender"; layer: SceneLayer }
-  | { op: "steam" } // pitcher heated, contents mix
+  | { op: "steam"; temp?: string } // pitcher heated, contents mix; temp shown on the thermometer (default 60–65 °C)
   | { op: "blend" } // pitcher/blender contents mix
   | { op: "pour"; foam: number; label: string } // pitcher/blender → cup; foam = share that turns to foam (1 = all)
   | { op: "ice" }
   | { op: "slices"; amount: string }
+  | { op: "mint"; amount: string } // mint leaves dropped into the cup
+  | { op: "muddle" } // muddler crushes what is in the cup
   | { op: "teabag" }
   | { op: "stir"; label: string } // cup layers mix into one
   | { op: "lid" };
