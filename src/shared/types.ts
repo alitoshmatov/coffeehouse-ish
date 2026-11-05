@@ -129,7 +129,31 @@ export interface RecipeSize {
   cup: string;
   lines: RecipeLine[];
   steps: string[];
+  cupKind: CupKind; // which cup the picture draws
+  scene: SceneOp[][]; // scene[i] = what step i does to the picture (same length as steps)
 }
+
+/* Picture of a drink being built, step by step (drawn by src/applicant/CupScene.tsx) */
+export type CupKind = "s" | "m" | "l" | "c5" | "c7" | "cone" | "icup";
+export interface SceneLayer {
+  key: string; // colour key: kofe, sut, slivki, sirop, kakao, laimon, banan, qul, konst, asal, suv, choysuv, smes
+  label: string; // "Sut"
+  vol: number; // ml, only for drawing to scale
+  amount: string; // "280 ml"
+}
+export type SceneOp =
+  | { op: "cup" }
+  | { op: "grind"; amount: string }
+  | { op: "add"; to: "cup" | "pitcher" | "blender"; layer: SceneLayer }
+  | { op: "steam" } // pitcher heated, contents mix
+  | { op: "blend" } // pitcher/blender contents mix
+  | { op: "pour"; foam: number; label: string } // pitcher/blender → cup; foam = share that turns to foam (1 = all)
+  | { op: "ice" }
+  | { op: "slices"; amount: string }
+  | { op: "teabag" }
+  | { op: "stir"; label: string } // cup layers mix into one
+  | { op: "lid" }
+  | { op: "sachet"; amount: string };
 
 export interface RecipeItem {
   id: string;

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookOpen, Check, ChevronRight, GraduationCap, Lightbulb, Loader2, RotateCcw, TriangleAlert, X } from "lucide-react";
+import { BookOpen, Check, ChevronLeft, ChevronRight, GraduationCap, Lightbulb, Loader2, Pause, Play, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { haptic, tg } from "@/lib/telegram";
 import type { RecipeBook, RecipeItem, RecipeSize } from "@/shared/types";
 import { BottomBar } from "./BottomBar";
+import { CupPicture } from "./CupScene";
 
 /**
  * Recipe course for trial baristas: golden rules, every drink with its sizes,
- * ingredients and numbered steps, and a quiz. "Bilaman" marks are kept on this phone.
+ * ingredients and numbered steps (with an animated cup picture that fills step by step), and a quiz. "Bilaman" marks are kept on this phone.
  */
 
 type View = { k: "home" } | { k: "item"; id: string } | { k: "quiz" };
@@ -198,17 +199,37 @@ function DrinkView({
   onHome: () => void;
 }) {
   const [si, setSi] = useState(0);
-  const [doneSteps, setDoneSteps] = useState<Set<number>>(new Set());
+  const [cur, setCur] = useState(-1); // last step shown in the picture (-1 = not started)
+  const [playing, setPlaying] = useState(false);
+  const [tip, setTip] = useState("");
   const s = item.sizes[si];
+  const last = s.steps.length - 1;
+  const hasScene = (s.scene?.length ?? 0) === s.steps.length;
+  const show = (i: number) => {
+    setCur(i);
+    setTip("");
+  };
   const pick = (i: number) => {
     setSi(i);
-    setDoneSteps(new Set());
+    setPlaying(false);
+    show(-1);
   };
-  const tick = (i: number) => {
-    const next = new Set(doneSteps);
-    if (next.has(i)) next.delete(i);
-    else next.add(i);
-    setDoneSteps(next);
+  const step = (d: number) => {
+    setPlaying(false);
+    show(Math.max(-1, Math.min(last, cur + d)));
+  };
+  useEffect(() => {
+    if (!playing) return;
+    const t = setTimeout(() => {
+      if (cur >= last) setPlaying(false);
+      else show(cur + 1);
+    }, cur < 0 ? 300 : 2400);
+    return () => clearTimeout(t);
+  }, [playing, cur, last]);
+  const play = () => {
+    if (playing) return setPlaying(false);
+    if (cur >= last) show(-1);
+    setPlaying(true);
   };
 
   return (
@@ -235,23 +256,95 @@ function DrinkView({
         </div>
       )}
 
+      {hasScene && (
+        <section className="mt-5 card p-4" aria-label="Ichimlik rasmi">
+          <CupPicture size={s} upto={cur} onTip={setTip} className="mx-auto max-w-[340px]" />
+          <p className="mt-1 min-h-[2.75rem] text-center text-sm leading-snug" aria-live="polite">
+            {tip ? (
+              <b>{tip}</b>
+            ) : cur < 0 ? (
+              <span className="text-bean/60">«Keyingi» ni bosing: stakan qadamma-qadam to‘ladi.</span>
+            ) : (
+              <>
+                <span className="font-semibold text-ember tabular-nums">{cur + 1}. </span>
+                {s.steps[cur]}
+              </>
+            )}
+          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <button onClick={() => step(-1)} disabled={cur < 0} className="btn-ghost w-12 px-0" aria-label="Oldingi qadam">
+              <ChevronLeft className="w-5 h-5" aria-hidden />
+            </button>
+            <button onClick={play} className="btn-ghost w-12 px-0" aria-label={playing ? "To‘xtatish" : "Avtomatik ko‘rsatish"}>
+              {playing ? <Pause className="w-5 h-5" aria-hidden /> : <Play className="w-5 h-5" aria-hidden />}
+            </button>
+            <button onClick={() => (cur >= last ? show(-1) : step(1))} className="btn-primary flex-1">
+              {cur >= last ? (
+                <>
+                  <RotateCcw className="w-4 h-4" aria-hidden /> Boshidan
+                </>
+              ) : (
+                <>
+                  Keyingi qadam
+                  <span className="tabular-nums text-foam/70 text-sm">
+                    {cur + 2}/{last + 1}
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
+          <p className="mt-2 text-center text-xs text-bean/50">Rasmdagi qatlamni bossangiz, nomi va miqdori chiqadi</p>
+        </section>
+      )}
+
       <section className="mt-6">
         <h2 className="font-poster uppercase text-xl font-bold">Tarkibi</h2>
         <Ingredients size={s} />
       </section>
 
+      {hasScene && item.sizes.length > 1 && (
+        <section className="mt-7">
+          <h2 className="font-poster uppercase text-xl font-bold">Hajmlarni solishtiring</h2>
+          <p className="text-sm text-bean/60">Tayyor ichimlik, har bir hajmda</p>
+          <div className="mt-3 grid gap-2" style={{ gridTemplateColumns: `repeat(${item.sizes.length}, minmax(0, 1fr))` }}>
+            {item.sizes.map((z, i) => (
+              <button
+                key={z.size}
+                onClick={() => pick(i)}
+                aria-pressed={i === si}
+                className={`card p-2 text-left transition-colors ${i === si ? "border-ember ring-1 ring-ember" : ""}`}
+              >
+                <CupPicture size={z} upto={z.steps.length - 1} mini />
+                <span className="block font-poster text-lg font-semibold leading-none">{z.size}</span>
+                <span className="mt-1 block text-[11px] leading-snug text-bean/60 tabular-nums">
+                  {z.lines
+                    .filter((l) => !l.base && l.qty != null)
+                    .map((l) => `${l.name} ${l.amount}`)
+                    .join(" · ")}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="mt-7">
         <h2 className="font-poster uppercase text-xl font-bold">Tayyorlash</h2>
-        <p className="text-sm text-bean/60">Bajarganingizda qadamni bosib belgilang</p>
+        <p className="text-sm text-bean/60">Qadamni bossangiz, rasm shu qadamga o‘tadi</p>
         <ol className="mt-3 space-y-2">
           {s.steps.map((t, i) => {
-            const d = doneSteps.has(i);
+            const d = i < cur;
+            const now = i === cur;
             return (
               <li key={i}>
                 <button
-                  onClick={() => tick(i)}
-                  aria-pressed={d}
-                  className={`w-full card p-3.5 flex gap-3 text-left transition-colors ${d ? "bg-foam/50 border-foam" : ""}`}
+                  onClick={() => {
+                    setPlaying(false);
+                    show(now ? i - 1 : i);
+                    if (hasScene) window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  aria-current={now ? "step" : undefined}
+                  className={`w-full card p-3.5 flex gap-3 text-left transition-colors ${now ? "border-ember ring-1 ring-ember" : d ? "bg-foam/50 border-foam" : ""}`}
                 >
                   <span
                     className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center text-sm font-semibold tabular-nums ${d ? "bg-emerald-600 text-white" : "bg-ember text-foam"}`}
@@ -326,7 +419,7 @@ function Ingredients({ size }: { size: RecipeSize }) {
 
 /* ───────────── quiz ───────────── */
 
-type Q = { title: string; ask: string; options: string[]; answer: string };
+type Q = { title: string; ask: string; options: string[]; answer: string; size?: RecipeSize };
 const ROUND = 10;
 
 function shuffle<T>(a: T[]): T[] {
@@ -360,7 +453,7 @@ function makeQuiz(book: RecipeBook, count = ROUND): Q[] {
       const wrong = [...new Set([...shuffle([...(seen.get(l.name) ?? [])]), ...near])].filter((v) => v !== l.qty).slice(0, 3);
       if (wrong.length < 3) continue;
       const answer = fmt(l.qty, l.unit);
-      qs.push({ title, ask: `${l.name} qancha?`, answer, options: shuffle([answer, ...wrong.map((v) => fmt(v, l.unit!))]) });
+      qs.push({ title, ask: `${l.name} qancha?`, answer, size: s, options: shuffle([answer, ...wrong.map((v) => fmt(v, l.unit!))]) });
     }
     const otherCups = shuffle(cups.filter((c) => c !== s.cup)).slice(0, 3);
     qs.push({ title, ask: "Qaysi stakanda beriladi?", answer: s.cup, options: shuffle([s.cup, ...otherCups]) });
@@ -430,6 +523,9 @@ function Quiz({ book, onHome }: { book: RecipeBook; onHome: () => void }) {
 
       <p className="mt-8 text-xs uppercase tracking-wider text-bean/55 font-semibold">{q.title}</p>
       <h1 className="font-poster uppercase text-[2.1rem] font-bold leading-tight">{q.ask}</h1>
+      {q.size?.scene?.length === q.size?.steps.length && q.size && (
+        <CupPicture key={i} size={q.size} upto={q.size.steps.length - 1} mini crop className="mx-auto mt-4 w-32" />
+      )}
 
       <div className="mt-6 grid gap-3" aria-live="polite">
         {q.options.map((o) => {

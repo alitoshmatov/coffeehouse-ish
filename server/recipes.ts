@@ -1,12 +1,13 @@
-import type { RecipeBook, RecipeCategory, RecipeItem, RecipeLine, RecipeSize } from "../src/shared/types";
+import type { CupKind, RecipeBook, RecipeCategory, RecipeItem, RecipeLine, RecipeSize, SceneLayer, SceneOp } from "../src/shared/types";
 
 /**
  * House recipes from the cost sheet ("Coffee House tan narx"), without prices.
  * Amounts per drink. Method steps follow the Barista school course.
  * Kept on the server so only trial baristas receive them (GET /api/recipes).
+ * Every step also says what it does to the drink picture (scene ops, drawn by CupScene.tsx).
  */
 
-type Cup = "s" | "m" | "l" | "c5" | "c7" | "cone" | "icup";
+type Cup = CupKind;
 const CUP: Record<Cup, string> = {
   s: "S · 0,25 l kraft stakan",
   m: "M · 0,35 l kraft stakan",
@@ -39,17 +40,32 @@ type Z = Record<Key, number>;
 
 const n = (v: number) => String(v).replace(".", ",");
 
-/* ── step texts ── */
-const take = (c: Cup) => `${CUP[c]} oling.`;
-const grind = (g: number) => `Portafiltrga ${g} g kofe torting, tekislang va bir tekis bosing.`;
-const shotCup = (g: number) => `Espresso tayyorlang (${g} g kofe → taxminan ${g * 2} g espresso, 25–30 s) va stakanga quying.`;
-const shotOver = (g: number) => `Espresso tayyorlang (${g} g → taxminan ${g * 2} g) va ustidan sekin quying.`;
-const sugar = (z: Z) => (z.shakar ? ` Shakarni (${n(z.shakar)} g) alohida taklif qiling.` : "");
-const lidHot = (z: Z) => `Qopqoqni yoping.${sugar(z)}`;
-const lidCold = (z: Z) => `Gumbaz qopqoqni yoping va trubochka qo‘ying.${sugar(z)}`;
-const ice = "Stakanni taxminan uchdan ikki qismigacha muz bilan to‘ldiring.";
+/* ── picture helpers ── */
+type St = { t: string; ops: SceneOp[] };
+const st = (t: string, ...ops: SceneOp[]): St => ({ t, ops });
+const CAP: Record<Cup, number> = { s: 250, m: 350, l: 450, c5: 500, c7: 700, cone: 160, icup: 160 };
+const L = (key: Key | "suv" | "choysuv", vol: number, amount?: string): SceneLayer => {
+  const known = key in ING ? ING[key as Key] : null;
+  return { key, label: known ? known[0] : key === "suv" ? "Suv" : "Issiq suv", vol, amount: amount ?? (known ? `${n(vol)} ${known[1]}` : "") };
+};
+const esp = (g: number): SceneLayer => ({ key: "kofe", label: "Espresso", vol: g * 2, amount: `${g} g kofe → ≈ ${g * 2} g` });
+const toCup = (layer: SceneLayer): SceneOp => ({ op: "add", to: "cup", layer });
+const toPitcher = (layer: SceneLayer): SceneOp => ({ op: "add", to: "pitcher", layer });
+const toBlender = (layer: SceneLayer): SceneOp => ({ op: "add", to: "blender", layer });
+const pour = (foam: number, label: string): SceneOp => ({ op: "pour", foam, label });
 
-function size(label: string, cup: Cup, ing: Ing, steps: (z: Z) => string[], lid = true): RecipeSize {
+/* ── step texts ── */
+const take = (c: Cup) => st(`${CUP[c]} oling.`, { op: "cup" });
+const grind = (g: number) => st(`Portafiltrga ${g} g kofe torting, tekislang va bir tekis bosing.`, { op: "grind", amount: `${g} g` });
+const shotCup = (g: number) => st(`Espresso tayyorlang (${g} g kofe → taxminan ${g * 2} g espresso, 25–30 s) va stakanga quying.`, toCup(esp(g)));
+const shotOver = (g: number) => st(`Espresso tayyorlang (${g} g → taxminan ${g * 2} g) va ustidan sekin quying.`, toCup(esp(g)));
+const sugar = (z: Z) => (z.shakar ? ` Shakarni (${n(z.shakar)} g) alohida taklif qiling.` : "");
+const sachet = (z: Z): SceneOp[] => (z.shakar ? [{ op: "sachet", amount: `${n(z.shakar)} g` }] : []);
+const lidHot = (z: Z) => st(`Qopqoqni yoping.${sugar(z)}`, { op: "lid" }, ...sachet(z));
+const lidCold = (z: Z) => st(`Gumbaz qopqoqni yoping va trubochka qo‘ying.${sugar(z)}`, { op: "lid" }, ...sachet(z));
+const ice = () => st("Stakanni taxminan uchdan ikki qismigacha muz bilan to‘ldiring.", { op: "ice" });
+
+function size(label: string, cup: Cup, ing: Ing, steps: (z: Z) => St[], lid = true): RecipeSize {
   const lines: RecipeLine[] = [{ name: "Stakan", amount: CUP[cup], base: true }];
   if (lid) lines.push({ name: "Qopqoq va h.k.", amount: "1 dona", base: true });
   const keys = (Object.keys(ing) as Key[]).sort((a, b) => Number(a === "shakar") - Number(b === "shakar"));
@@ -62,7 +78,8 @@ function size(label: string, cup: Cup, ing: Ing, steps: (z: Z) => string[], lid 
         : { name, amount: `${n(q)} ${unit}`, qty: q, unit, base: k === "shakar" || undefined },
     );
   }
-  return { size: label, cup: CUP[cup], lines, steps: steps(ing as Z) };
+  const all = steps(ing as Z);
+  return { size: label, cup: CUP[cup], lines, steps: all.map((x) => x.t), cupKind: cup, scene: all.map((x) => x.ops) };
 }
 
 const item = (id: string, name: string, sizes: RecipeSize[], extra: { tip?: string; note?: string } = {}): RecipeItem => ({
@@ -76,130 +93,161 @@ const item = (id: string, name: string, sizes: RecipeSize[], extra: { tip?: stri
 const espresso = (c: Cup) => (z: Z) => [
   take(c),
   grind(z.kofe),
-  `Qo‘sh espresso tayyorlang: 25–30 s da taxminan ${z.kofe * 2} g, to‘g‘ridan-to‘g‘ri stakanga.`,
+  st(`Qo‘sh espresso tayyorlang: 25–30 s da taxminan ${z.kofe * 2} g, to‘g‘ridan-to‘g‘ri stakanga.`, toCup(esp(z.kofe))),
   lidHot(z),
 ];
 
-const cappuccino = (c: Cup) => (z: Z) => [
+const milkDrink = (foam: number, steam: (ml: number) => string, pourText: string) => (c: Cup) => (z: Z) => [
   take(c),
   grind(z.kofe),
   shotCup(z.kofe),
-  `${z.sut} ml sovuq sutni qalin ko‘pik bilan (taxminan 1,5 sm) 60–65 °C gacha bug‘lang.`,
-  "Sutni espressoga quying: avval aralashishi uchun balanddan, so‘ng ko‘pik ustida qolishi uchun pastdan.",
+  st(steam(z.sut), toPitcher(L("sut", z.sut)), { op: "steam" }),
+  st(pourText, pour(foam, "Bug‘langan sut")),
   lidHot(z),
 ];
+const cappuccino = milkDrink(
+  0.4,
+  (ml) => `${ml} ml sovuq sutni qalin ko‘pik bilan (taxminan 1,5 sm) 60–65 °C gacha bug‘lang.`,
+  "Sutni espressoga quying: avval aralashishi uchun balanddan, so‘ng ko‘pik ustida qolishi uchun pastdan.",
+);
 const americano = (c: Cup) => (z: Z) => [
   take(c),
-  "Stakanga dispenserdan issiq suv (92–96 °C) quying, tepada espresso uchun joy qoldiring.",
+  st(
+    "Stakanga dispenserdan issiq suv (92–96 °C) quying, tepada espresso uchun joy qoldiring.",
+    toCup(L("suv", Math.round(CAP[c] * 0.62), "tepada joy qoldirib")),
+  ),
   grind(z.kofe),
-  `Espresso tayyorlang (${z.kofe} g → taxminan ${z.kofe * 2} g) va krema ustida qolishi uchun suv ustidan quying.`,
+  st(`Espresso tayyorlang (${z.kofe} g → taxminan ${z.kofe * 2} g) va krema ustida qolishi uchun suv ustidan quying.`, toCup(esp(z.kofe))),
   lidHot(z),
 ];
-const latte = (c: Cup) => (z: Z) => [
-  take(c),
-  grind(z.kofe),
-  shotCup(z.kofe),
-  `${z.sut} ml sovuq sutni yupqa, yaltiroq ko‘pik bilan (taxminan 0,5–1 sm) 60–65 °C gacha bug‘lang.`,
+const latte = milkDrink(
+  0.12,
+  (ml) => `${ml} ml sovuq sutni yupqa, yaltiroq ko‘pik bilan (taxminan 0,5–1 sm) 60–65 °C gacha bug‘lang.`,
   "Sutni espressoga bir tekis oqim bilan quying va ustida yurak bilan tugating.",
-  lidHot(z),
-];
+);
 const raf = (c: Cup) => (z: Z) => [
   take(c),
   grind(z.kofe),
-  `Espressoni (${z.kofe} g → taxminan ${z.kofe * 2} g) sut pitcheriga tayyorlang.`,
-  `Pitcherga ${z.sut} ml sut, ${z.slivki} ml slivki va ${z.sirop} g sirop qo‘shing.`,
-  "Hammasini birga kremsimon bo‘lguncha, yengil ko‘pik bilan 60–65 °C gacha bug‘lang. Slivkini qaynatmang.",
-  "Stakanga quying.",
+  st(`Espressoni (${z.kofe} g → taxminan ${z.kofe * 2} g) sut pitcheriga tayyorlang.`, toPitcher(esp(z.kofe))),
+  st(
+    `Pitcherga ${z.sut} ml sut, ${z.slivki} ml slivki va ${z.sirop} g sirop qo‘shing.`,
+    toPitcher(L("sut", z.sut)),
+    toPitcher(L("slivki", z.slivki)),
+    toPitcher(L("sirop", z.sirop)),
+  ),
+  st("Hammasini birga kremsimon bo‘lguncha, yengil ko‘pik bilan 60–65 °C gacha bug‘lang. Slivkini qaynatmang.", { op: "steam" }),
+  st("Stakanga quying.", pour(0.18, "Raf")),
   lidHot(z),
 ];
-const flatWhite = (c: Cup) => (z: Z) => [
-  take(c),
-  grind(z.kofe),
-  shotCup(z.kofe),
-  `${z.sut} ml sovuq sutni juda yupqa, ipakdek mikroko‘pik bilan (taxminan 0,5 sm) 60–65 °C gacha bug‘lang.`,
+const flatWhite = milkDrink(
+  0.08,
+  (ml) => `${ml} ml sovuq sutni juda yupqa, ipakdek mikroko‘pik bilan (taxminan 0,5 sm) 60–65 °C gacha bug‘lang.`,
   "Sirtga yaqin, sekin quying va kichik yurak bilan tugating.",
-  lidHot(z),
-];
+);
 const cocoa = (c: Cup) => (z: Z) => [
   take(c),
-  `Stakanga ${z.kakao} g kakao kukuni soling.`,
-  "Ozgina issiq sut qo‘shing va bo‘laksiz silliq pasta bo‘lguncha aralashtiring.",
-  `Qolgan sutni (jami ≈ ${z.sut} ml) ozgina ko‘pik bilan 60–65 °C gacha bug‘lang.`,
-  "Aralashtirib turib quying va ustida ko‘pik bilan tugating.",
+  st(`Stakanga ${z.kakao} g kakao kukuni soling.`, toCup(L("kakao", z.kakao))),
+  st("Ozgina issiq sut qo‘shing va bo‘laksiz silliq pasta bo‘lguncha aralashtiring.", toCup(L("sut", 20, "ozgina")), { op: "stir", label: "Kakao pastasi" }),
+  st(`Qolgan sutni (jami ≈ ${z.sut} ml) ozgina ko‘pik bilan 60–65 °C gacha bug‘lang.`, toPitcher(L("sut", z.sut - 20, `≈ ${z.sut - 20} ml`)), { op: "steam" }),
+  st("Aralashtirib turib quying va ustida ko‘pik bilan tugating.", pour(0.12, "Bug‘langan sut")),
   lidHot(z),
 ];
 
 /* ── ice coffee ── */
-const iceAmericano = (c: Cup) => (z: Z) => [take(c), ice, "Sovuq suv qo‘shing, tepada espresso uchun joy qoldiring.", grind(z.kofe), shotOver(z.kofe), lidCold(z)];
+const iceAmericano = (c: Cup) => (z: Z) => [
+  take(c),
+  ice(),
+  st("Sovuq suv qo‘shing, tepada espresso uchun joy qoldiring.", toCup(L("suv", Math.round(CAP[c] * 0.45), "tepada joy qoldirib"))),
+  grind(z.kofe),
+  shotOver(z.kofe),
+  lidCold(z),
+];
 const iceCappuccino = (c: Cup) => (z: Z) => {
   const first = Math.round((z.sut * 0.65) / 5) * 5;
   return [
     take(c),
-    ice,
-    `Muz ustiga ${first} ml sovuq sut quying. Qolgan ${z.sut - first} ml sutni alohida qoldiring.`,
+    ice(),
+    st(`Muz ustiga ${first} ml sovuq sut quying. Qolgan ${z.sut - first} ml sutni alohida qoldiring.`, toCup(L("sut", first))),
     grind(z.kofe),
     shotOver(z.kofe),
-    `Qolgan ${z.sut - first} ml sovuq sutni bug‘siz, frother yoki sheyker bilan qalin sovuq ko‘pikka aylantiring.`,
-    "Sovuq ko‘pikni qoshiq bilan ustiga qo‘ying.",
+    st(
+      `Qolgan ${z.sut - first} ml sovuq sutni bug‘siz, frother yoki sheyker bilan qalin sovuq ko‘pikka aylantiring.`,
+      toPitcher(L("sut", z.sut - first)),
+      { op: "blend" },
+    ),
+    st("Sovuq ko‘pikni qoshiq bilan ustiga qo‘ying.", pour(1, "Sovuq ko‘pik")),
     lidCold(z),
   ];
 };
 const iceLatte = (c: Cup) => (z: Z) => [
   take(c),
-  ice,
-  `Muz ustiga ${z.sut} ml sovuq sut quying.`,
+  ice(),
+  st(`Muz ustiga ${z.sut} ml sovuq sut quying.`, toCup(L("sut", z.sut))),
   grind(z.kofe),
-  `Espresso tayyorlang (${z.kofe} g → taxminan ${z.kofe * 2} g) va qatlamli ko‘rinish uchun qoshiq orqasidan sekin quying.`,
+  st(`Espresso tayyorlang (${z.kofe} g → taxminan ${z.kofe * 2} g) va qatlamli ko‘rinish uchun qoshiq orqasidan sekin quying.`, toCup(esp(z.kofe))),
   lidCold(z),
 ];
 const iceRaf = (c: Cup) => (z: Z) => [
   take(c),
-  ice,
+  ice(),
   grind(z.kofe),
-  `Sheyker yoki blender idishiga ${z.sut} ml sovuq sut, ${z.slivki} ml slivki va espresso (${z.kofe} g → taxminan ${z.kofe * 2} g) soling.`,
-  "Ko‘piklanguncha 10–15 s chayqating yoki aralashtiring.",
-  "Muz ustiga quying.",
+  st(
+    `Sheyker yoki blender idishiga ${z.sut} ml sovuq sut, ${z.slivki} ml slivki va espresso (${z.kofe} g → taxminan ${z.kofe * 2} g) soling.`,
+    toBlender(L("sut", z.sut)),
+    toBlender(L("slivki", z.slivki)),
+    toBlender(esp(z.kofe)),
+  ),
+  st("Ko‘piklanguncha 10–15 s chayqating yoki aralashtiring.", { op: "blend" }),
+  st("Muz ustiga quying.", pour(0.06, "Ice Raf")),
   lidCold(z),
 ];
 
 /* ── mohito, cocktails, tea, milkshake, ice cream ── */
 const mohito = (c: Cup) => (z: Z) => [
   take(c),
-  `${z.limon} g limonni bo‘laklarga kesib, stakanga soling.`,
-  "Sharbat chiqishi uchun limonni madler bilan ezing.",
-  ...(z.sirop ? [`${z.sirop} g sirop qo‘shing.`] : []),
-  ice,
-  `${z.laimon} ml sovuq Laimon Fresh quying va tubidan sekin aralashtiring.`,
+  st(`${z.limon} g limonni bo‘laklarga kesib, stakanga soling.`, { op: "slices", amount: `${z.limon} g` }),
+  st("Sharbat chiqishi uchun limonni madler bilan ezing."),
+  ...(z.sirop ? [st(`${z.sirop} g sirop qo‘shing.`, toCup(L("sirop", z.sirop)))] : []),
+  ice(),
+  st(`${z.laimon} ml sovuq Laimon Fresh quying va tubidan sekin aralashtiring.`, toCup(L("laimon", z.laimon))),
   lidCold(z),
 ];
 const shake = (c: Cup, kind: "banan" | "qul" | "choco") => (z: Z) => [
   take(c),
-  `Blender idishiga ${z.sut} ml sovuq sut quying.`,
-  ...(kind === "banan" ? [`${z.banan} g bananni tozalab, bo‘laklarga bo‘ling va qo‘shing.`] : []),
-  ...(kind === "qul" ? ["Yuvilgan qulupnayni qo‘shing."] : []),
-  kind === "choco" ? `${z.sirop} g shokolad siropi qo‘shing.` : `${z.sirop} g sirop qo‘shing.`,
-  "Silliq bo‘lguncha 30–40 s aralashtiring.",
-  "Stakanga quying.",
+  st(`Blender idishiga ${z.sut} ml sovuq sut quying.`, toBlender(L("sut", z.sut))),
+  ...(kind === "banan" ? [st(`${z.banan} g bananni tozalab, bo‘laklarga bo‘ling va qo‘shing.`, toBlender(L("banan", z.banan)))] : []),
+  ...(kind === "qul" ? [st("Yuvilgan qulupnayni qo‘shing.", toBlender({ ...L("qul", 60), amount: "miqdori hali belgilanmagan" }))] : []),
+  st(kind === "choco" ? `${z.sirop} g shokolad siropi qo‘shing.` : `${z.sirop} g sirop qo‘shing.`, toBlender(L("sirop", z.sirop))),
+  st("Silliq bo‘lguncha 30–40 s aralashtiring.", { op: "blend" }),
+  st("Stakanga quying.", pour(0.08, "Kokteyl")),
   lidCold(z),
 ];
 const tea = (c: Cup) => (z: Z) => [
   take(c),
-  "Qaysi ta’mni so‘rang: oblepixa, imbirniy yoki yagodniy.",
-  `Stakanga ${z.konst} g choy konsentrati va ${z.asal} g asal soling.`,
-  "Choy paketchasini qo‘shing.",
-  "Chetidan 1 sm pastgacha issiq suv (taxminan 95 °C) quying.",
-  "Asal eriguncha aralashtiring, so‘ng qopqoqni yoping.",
+  st("Qaysi ta’mni so‘rang: oblepixa, imbirniy yoki yagodniy."),
+  st(`Stakanga ${z.konst} g choy konsentrati va ${z.asal} g asal soling.`, toCup(L("konst", z.konst)), toCup(L("asal", z.asal))),
+  st("Choy paketchasini qo‘shing.", { op: "teabag" }),
+  st("Chetidan 1 sm pastgacha issiq suv (taxminan 95 °C) quying.", toCup(L("choysuv", Math.round(CAP[c] * 0.72), "chetidan 1 sm pastgacha"))),
+  st("Asal eriguncha aralashtiring, so‘ng qopqoqni yoping.", { op: "stir", label: "Choy" }, { op: "lid" }),
 ];
 const milkshake = (c: Cup) => (z: Z) => [
   take(c),
-  `Blender idishini muzqaymoq mashinasidan ${z.smes} g muzqaymoq bilan to‘ldiring.`,
-  `${z.sut} ml sovuq sut va ${z.sirop} g sirop qo‘shing.`,
-  "Quyuq va silliq bo‘lguncha 20–30 s aralashtiring.",
-  "Stakanga quying.",
+  st(`Blender idishini muzqaymoq mashinasidan ${z.smes} g muzqaymoq bilan to‘ldiring.`, toBlender(L("smes", z.smes))),
+  st(`${z.sut} ml sovuq sut va ${z.sirop} g sirop qo‘shing.`, toBlender(L("sut", z.sut)), toBlender(L("sirop", z.sirop))),
+  st("Quyuq va silliq bo‘lguncha 20–30 s aralashtiring.", { op: "blend" }),
+  st("Stakanga quying.", pour(0.1, "Milkshake")),
   lidCold(z),
 ];
-const cone = (z: Z) => [take("cone"), `Richagni torting va konusni ${z.smes} g muzqaymoq bilan zich spiral qilib aylantirib to‘ldiring.`, "Darhol salfetka bilan bering."];
-const icup = (z: Z) => [take("icup"), `Richagni torting va stakanchani ${z.smes} g muzqaymoq bilan to‘ldiring, so‘ng ustida spiral bilan tugating.`, "Qoshiq qo‘ying va bering."];
+const cone = (z: Z) => [
+  take("cone"),
+  st(`Richagni torting va konusni ${z.smes} g muzqaymoq bilan zich spiral qilib aylantirib to‘ldiring.`, toCup(L("smes", z.smes))),
+  st("Darhol salfetka bilan bering."),
+];
+const icup = (z: Z) => [
+  take("icup"),
+  st(`Richagni torting va stakanchani ${z.smes} g muzqaymoq bilan to‘ldiring, so‘ng ustida spiral bilan tugating.`, toCup(L("smes", z.smes))),
+  st("Qoshiq qo‘ying va bering."),
+];
 
 const HOT = 29;
 const CATEGORIES: RecipeCategory[] = [
