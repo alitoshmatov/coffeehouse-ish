@@ -43,8 +43,6 @@ export interface SceneState {
   slicesAmount: string;
   teabag: Flag;
   lid: Flag;
-  sachet: Flag;
-  sachetAmount: string;
   grind: string | null;
   steam: boolean;
   blend: boolean;
@@ -68,7 +66,7 @@ const sum = (ls: { vol: number }[]) => ls.reduce((a, l) => a + l.vol, 0);
 export function applyScene(size: RecipeSize, upto: number): SceneState {
   const S: SceneState = {
     cup: 0, layers: [], side: null, ice: 0, slices: 0, slicesAmount: "", teabag: 0,
-    lid: 0, sachet: 0, sachetAmount: "", grind: null, steam: false, blend: false,
+    lid: 0, grind: null, steam: false, blend: false,
   };
   const scene = size.scene ?? [];
   for (let i = 0; i <= upto && i < scene.length; i++) {
@@ -116,7 +114,6 @@ export function applyScene(size: RecipeSize, upto: number): SceneState {
         case "slices": S.slices = f; S.slicesAmount = o.amount; break;
         case "teabag": S.teabag = f; break;
         case "lid": S.lid = f; break;
-        case "sachet": S.sachet = f; S.sachetAmount = o.amount; break;
       }
     }
   }
@@ -222,8 +219,6 @@ export function sceneSvg(kind: CupKind, S: SceneState, o: { mini?: boolean; full
     else if (!sweet)
       s += `<g${c}><rect x="${Lx - 5}" y="${g.top - 9}" width="${g.tw + 10}" height="10" rx="3" fill="${LID}"/><rect x="${Lx + 8}" y="${g.top - 18}" width="${g.tw - 16}" height="11" rx="5" fill="${LID}"/></g>`;
   }
-  if (S.sachet && !mini)
-    s += `<g transform="translate(4 212)"><g${S.sachet === 2 ? ` class="cs-drop"` : ""}><rect class="cs-ly" width="34" height="38" rx="3" fill="#fff" stroke="${INK}" stroke-opacity=".4" data-tip="${esc(`Shakar (alohida): ${S.sachetAmount}`)}"/><text x="17" y="17" text-anchor="middle" font-size="9" fill="${INK}" fill-opacity=".6">shakar</text><text x="17" y="30" text-anchor="middle" font-size="10" font-weight="600" fill="${INK}">${esc(S.sachetAmount)}</text></g></g>`;
 
   if (!mini) {
     const sx = 238;
@@ -284,7 +279,6 @@ export function CupPicture({
     const S = applyScene(size, upto);
     if (mini) {
       S.lid = 0;
-      S.sachet = 0;
       S.layers.forEach((l) => (l.fresh = false));
     }
     return sceneSvg(size.cupKind ?? "m", S, { mini, full, crop });

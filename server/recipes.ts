@@ -32,7 +32,6 @@ const ING = {
   choy: ["Choy paketchasi", "dona"],
   smes: ["Smes (muzqaymoq)", "g"],
   qul: ["Qulupnay", "g"],
-  shakar: ["Shakar (alohida)", "g"],
 } as const;
 type Key = keyof typeof ING;
 type Ing = Partial<Record<Key, number | null>>;
@@ -59,23 +58,21 @@ const take = (c: Cup) => st(`${CUP[c]} oling.`, { op: "cup" });
 const grind = (g: number) => st(`Portafiltrga ${g} g kofe torting, tekislang va bir tekis bosing.`, { op: "grind", amount: `${g} g` });
 const shotCup = (g: number) => st(`Espresso tayyorlang (${g} g kofe → taxminan ${g * 2} g espresso, 25–30 s) va stakanga quying.`, toCup(esp(g)));
 const shotOver = (g: number) => st(`Espresso tayyorlang (${g} g → taxminan ${g * 2} g) va ustidan sekin quying.`, toCup(esp(g)));
-const sugar = (z: Z) => (z.shakar ? ` Shakarni (${n(z.shakar)} g) alohida taklif qiling.` : "");
-const sachet = (z: Z): SceneOp[] => (z.shakar ? [{ op: "sachet", amount: `${n(z.shakar)} g` }] : []);
-const lidHot = (z: Z) => st(`Qopqoqni yoping.${sugar(z)}`, { op: "lid" }, ...sachet(z));
-const lidCold = (z: Z) => st(`Gumbaz qopqoqni yoping va trubochka qo‘ying.${sugar(z)}`, { op: "lid" }, ...sachet(z));
+const lidHot = (_z: Z) => st("Qopqoqni yoping.", { op: "lid" });
+const lidCold = (_z: Z) => st("Gumbaz qopqoqni yoping va trubochka qo‘ying.", { op: "lid" });
 const ice = () => st("Stakanni taxminan uchdan ikki qismigacha muz bilan to‘ldiring.", { op: "ice" });
 
 function size(label: string, cup: Cup, ing: Ing, steps: (z: Z) => St[], lid = true): RecipeSize {
   const lines: RecipeLine[] = [{ name: "Stakan", amount: CUP[cup], base: true }];
   if (lid) lines.push({ name: "Qopqoq va h.k.", amount: "1 dona", base: true });
-  const keys = (Object.keys(ing) as Key[]).sort((a, b) => Number(a === "shakar") - Number(b === "shakar"));
+  const keys = Object.keys(ing) as Key[];
   for (const k of keys) {
     const [name, unit] = ING[k];
     const q = ing[k];
     lines.push(
       q == null
         ? { name, amount: "miqdori hali belgilanmagan" }
-        : { name, amount: `${n(q)} ${unit}`, qty: q, unit, base: k === "shakar" || undefined },
+        : { name, amount: `${n(q)} ${unit}`, qty: q, unit },
     );
   }
   const all = steps(ing as Z);
@@ -249,22 +246,21 @@ const icup = (z: Z) => [
   st("Qoshiq qo‘ying va bering."),
 ];
 
-const HOT = 29;
 const CATEGORIES: RecipeCategory[] = [
   {
     id: "kofe",
     title: "Kofe",
     items: [
-      item("espresso", "Espresso", [size("S", "s", { kofe: 18, shakar: HOT }, espresso("s"))], {
+      item("espresso", "Espresso", [size("S", "s", { kofe: 18 }, espresso("s"))], {
         tip: "Bir daqiqa ichida bering: krema tez yo‘qoladi.",
       }),
       item(
         "cappuccino",
         "Cappuccino",
         [
-          size("S", "s", { kofe: 9, sut: 200, shakar: HOT }, cappuccino("s")),
-          size("M", "m", { kofe: 18, sut: 280, shakar: HOT }, cappuccino("m")),
-          size("L", "l", { kofe: 18, sut: 380, shakar: HOT }, cappuccino("l")),
+          size("S", "s", { kofe: 9, sut: 200 }, cappuccino("s")),
+          size("M", "m", { kofe: 18, sut: 280 }, cappuccino("m")),
+          size("L", "l", { kofe: 18, sut: 380 }, cappuccino("l")),
         ],
         { tip: "Cappuccino menyudagi eng qalin ko‘pikka ega, taxminan 1,5 sm. To‘la stakan hajmiga nisbatan yengil bo‘lishi kerak." },
       ),
@@ -272,16 +268,16 @@ const CATEGORIES: RecipeCategory[] = [
         "americano",
         "Americano",
         [
-          size("S", "s", { kofe: 9, shakar: HOT }, americano("s")),
-          size("M", "m", { kofe: 18, shakar: HOT }, americano("m")),
-          size("L", "l", { kofe: 18, shakar: HOT }, americano("l")),
+          size("S", "s", { kofe: 9 }, americano("s")),
+          size("M", "m", { kofe: 18 }, americano("m")),
+          size("L", "l", { kofe: 18 }, americano("l")),
         ],
         { tip: "Avval suv, keyin espresso: krema saqlanadi va ichimlik kamroq achchiq bo‘ladi." },
       ),
       item(
         "latte",
         "Latte",
-        [size("M", "m", { kofe: 9, sut: 260, shakar: HOT }, latte("m")), size("L", "l", { kofe: 18, sut: 380, shakar: HOT }, latte("l"))],
+        [size("M", "m", { kofe: 9, sut: 260 }, latte("m")), size("L", "l", { kofe: 18, sut: 380 }, latte("l"))],
         { tip: "Latteda ko‘pik cappuccinodan kam: bug‘langan sut ho‘l bo‘yoqdek quyilishi kerak." },
       ),
       item(
@@ -292,9 +288,9 @@ const CATEGORIES: RecipeCategory[] = [
           size("M", "m", { kofe: 18, sut: 130, sirop: 30, slivki: 100 }, raf("m")),
           size("L", "l", { kofe: 18, sut: 200, sirop: 60, slivki: 100 }, raf("l")),
         ],
-        { tip: "Raf espresso bilan birga pitcherda bug‘lanadi, shuning uchun u silliq va shirin. Shakar alohida berilmaydi." },
+        { tip: "Raf espresso bilan birga pitcherda bug‘lanadi, shuning uchun u silliq va shirin." },
       ),
-      item("flat-white", "Flat White", [size("S", "s", { kofe: 18, sut: 190, shakar: HOT }, flatWhite("s"))], {
+      item("flat-white", "Flat White", [size("S", "s", { kofe: 18, sut: 190 }, flatWhite("s"))], {
         tip: "Flat White menyudagi eng kuchli sutli kofe: kichik stakanda qo‘sh shot va deyarli ko‘piksiz.",
       }),
     ],
@@ -303,10 +299,10 @@ const CATEGORIES: RecipeCategory[] = [
     id: "kakao",
     title: "Kakao",
     items: [
-      item("goryachiy-shokolad", "Goryachiy shokolad", [size("S", "s", { kakao: 20, sut: 120, shakar: 17.5 }, cocoa("s"))], {
+      item("goryachiy-shokolad", "Goryachiy shokolad", [size("S", "s", { kakao: 20, sut: 120 }, cocoa("s"))], {
         tip: "Issiq shokoladda kakaodan kamroq sut bor, shuning uchun u quyuqroq.",
       }),
-      item("kakao", "Kakao", [size("M", "m", { kakao: 20, sut: 150, shakar: 17.5 }, cocoa("m"))], {
+      item("kakao", "Kakao", [size("M", "m", { kakao: 20, sut: 150 }, cocoa("m"))], {
         tip: "Avval pasta tayyorlang: to‘g‘ridan-to‘g‘ri issiq sutga solingan kakao quruq bo‘lak bo‘lib suzib yuradi.",
       }),
     ],
@@ -315,16 +311,16 @@ const CATEGORIES: RecipeCategory[] = [
     id: "ice",
     title: "Ice Coffee",
     items: [
-      item("ice-americano", "Ice Americano", [size("M", "c5", { kofe: 18, shakar: HOT }, iceAmericano("c5")), size("L", "c7", { kofe: 18, shakar: HOT }, iceAmericano("c7"))], {
+      item("ice-americano", "Ice Americano", [size("M", "c5", { kofe: 18 }, iceAmericano("c5")), size("L", "c7", { kofe: 18 }, iceAmericano("c7"))], {
         tip: "Espressoni oxirida va sekin muz ustiga quying: u darhol soviydi va hidini saqlaydi.",
       }),
       item(
         "ice-cappuccino",
         "Ice Cappuccino",
-        [size("M", "c5", { kofe: 18, sut: 200, shakar: HOT }, iceCappuccino("c5")), size("L", "c7", { kofe: 18, sut: 300, shakar: HOT }, iceCappuccino("c7"))],
+        [size("M", "c5", { kofe: 18, sut: 200 }, iceCappuccino("c5")), size("L", "c7", { kofe: 18, sut: 300 }, iceCappuccino("c7"))],
         { tip: "Sovuq ko‘pik bug‘siz tayyorlanadi: issiq ko‘pik muzni eritib, ichimlikni suyultiradi." },
       ),
-      item("ice-latte", "Ice Latte", [size("M", "c5", { kofe: 18, sut: 290, shakar: HOT }, iceLatte("c5")), size("L", "c7", { kofe: 18, sut: 340, shakar: HOT }, iceLatte("c7"))], {
+      item("ice-latte", "Ice Latte", [size("M", "c5", { kofe: 18, sut: 290 }, iceLatte("c5")), size("L", "c7", { kofe: 18, sut: 340 }, iceLatte("c7"))], {
         tip: "Espressoni sekin quying: u sovuq sut ustida suzib, mehmonlar yoqtiradigan qatlamlarni hosil qiladi.",
       }),
       item("ice-raf", "Ice Raf", [size("M", "c5", { kofe: 18, sut: 150, slivki: 100 }, iceRaf("c5")), size("L", "c7", { kofe: 18, sut: 250, slivki: 100 }, iceRaf("c7"))], {
@@ -401,7 +397,6 @@ const CATEGORIES: RecipeCategory[] = [
 
 export const RECIPE_BOOK: RecipeBook = {
   rules: [
-    { title: "Issiq ichimlik asosi", big: "Stakan + qopqoq + 29 g shakar", text: "Shakar mehmonga alohida beriladi. Kakaoda 17,5 g. Raf va Ice Rafda shakar yo‘q." },
     { title: "Stakan hajmlari", big: "S 0,25 · M 0,35 · L 0,45", text: "Issiq ichimliklar kraft stakanda. Sovuq ichimliklarda M = 0,5 l, L = 0,7 l shaffof stakan." },
     { title: "Kofe miqdori", big: "Odatda 18 g", text: "Faqat 4 ta joyda 9 g: Cappuccino S, Americano S, Latte M, Raf S." },
     { title: "Espresso", big: "18 g → 36 g, 25–30 s", text: "Kofe og‘irligidan ikki baravar espresso. Tez oqsa — maydaroq, sekin oqsa — yirikroq torting." },

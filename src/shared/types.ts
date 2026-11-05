@@ -121,7 +121,7 @@ export interface RecipeLine {
   amount: string; // "280 ml" or "S · 0,25 l kraft stakan"
   qty?: number; // numeric part, for practice questions
   unit?: string;
-  base?: boolean; // cup, lid, sugar — the same on most drinks
+  base?: boolean; // cup and lid — the same on most drinks
 }
 
 export interface RecipeSize {
@@ -152,8 +152,7 @@ export type SceneOp =
   | { op: "slices"; amount: string }
   | { op: "teabag" }
   | { op: "stir"; label: string } // cup layers mix into one
-  | { op: "lid" }
-  | { op: "sachet"; amount: string };
+  | { op: "lid" };
 
 export interface RecipeItem {
   id: string;
